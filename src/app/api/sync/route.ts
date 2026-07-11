@@ -3,12 +3,14 @@ import { createClient } from "@/lib/supabase/server";
 
 const TIMEOUT_MS = 12_000;
 
-export async function POST() {
+export async function POST(request: Request) {
   const webhookUrl = process.env.N8N_SYNC_WEBHOOK_URL;
   const secret = process.env.N8N_SYNC_WEBHOOK_SECRET;
   if (!webhookUrl || !secret) return NextResponse.json({ error: "لم تُضبط إعدادات مزامنة n8n على الخادم." }, { status: 503 });
-  const requestStartedAt = new Date().toISOString();
-  const requestId = crypto.randomUUID();
+  // Allow for clock skew and the time n8n needs before inserting sync_runs.
+  const startedAfter = new Date(Date.now() - 60_000).toISOString();
+  const body = await request.json().catch(() => ({}));
+  const requestId = typeof body.request_id === "string" ? body.request_id : crypto.randomUUID();
   const supabase = await createClient();
   const { data: running, error: runningError } = await supabase
     .from("sync_runs").select("id,status,started_at").eq("status", "running").order("started_at", { ascending: false }).limit(1).maybeSingle();
@@ -21,7 +23,7 @@ export async function POST() {
     if (!response.ok) return NextResponse.json({ error: "رفض n8n طلب المزامنة." }, { status: 502 });
     const contentType = response.headers.get("content-type") ?? "";
     const payload = contentType.includes("application/json") ? await response.json().catch(() => ({})) : {};
-    return NextResponse.json({ accepted: payload.accepted ?? true, execution_id: payload.execution_id ?? null, status: payload.status ?? "running", request_id: requestId, request_started_at: requestStartedAt }, { status: 202 });
+    return NextResponse.json({ accepted: payload.accepted ?? true, execution_id: payload.execution_id ?? null, status: payload.status ?? "running", request_id: requestId, started_after: startedAfter }, { status: 202 });
   } catch (error) {
     const message = error instanceof Error && error.name === "AbortError" ? "انتهت مهلة الاتصال بـn8n." : "تعذر بدء مزامنة n8n.";
     return NextResponse.json({ error: message }, { status: 502 });
