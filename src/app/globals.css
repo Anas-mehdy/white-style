@@ -372,23 +372,23 @@ button { cursor: pointer; }
 }
 .chart-line-spend {
   stroke: var(--green);
-  stroke-width: 2px;
+  stroke-width: 1.5px;
   fill: none;
 }
 .chart-line-conv {
   stroke: var(--blue);
-  stroke-width: 2px;
+  stroke-width: 1.5px;
   fill: none;
 }
 .chart-dot-spend {
   fill: var(--surface);
   stroke: var(--green);
-  stroke-width: 2px;
+  stroke-width: 1.5px;
 }
 .chart-dot-conv {
   fill: var(--surface);
   stroke: var(--blue);
-  stroke-width: 2px;
+  stroke-width: 1.5px;
 }
 
 /* Counts Grid (Campaigns, Ad Sets, Ads, Insights) */

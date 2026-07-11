@@ -2,7 +2,7 @@ import "server-only";
 import { createClient } from "@/lib/supabase/server";
 
 export type AccountRow = { id: string; name: string; meta_account_id: string; currency: string; timezone_name: string; connection_status: string; last_synced_at: string | null; spend: number; conversations: number };
-export type ChartPoint = { date: string; spend: number; conversations: number };
+export type ChartPoint = { date: string; spend: number; conversations: number; impressions?: number; hasRealData?: boolean };
 
 const number = (value: unknown) => Number(value ?? 0);
 const since = (days: number) => new Date(Date.now() - (days - 1) * 86400000).toISOString().slice(0, 10);
@@ -12,7 +12,7 @@ export async function getDashboardData(days = 30) {
   const from = since(days);
   const [accountsResult, insightsResult, decisionsResult, runsResult, notificationsResult, configResult] = await Promise.all([
     supabase.from("meta_ad_accounts").select("id,name,meta_account_id,currency,timezone_name,connection_status,last_synced_at").order("name"),
-    supabase.from("ad_insights_daily").select("ad_account_id,organization_id,insight_date,spend,messaging_conversations,cost_per_conversation").gte("insight_date", from).order("insight_date"),
+    supabase.from("ad_insights_daily").select("ad_account_id,organization_id,insight_date,spend,messaging_conversations,cost_per_conversation,impressions").gte("insight_date", from).order("insight_date"),
     supabase.from("agent_decisions").select("id").gte("created_at", from),
     supabase.from("sync_runs").select("status,finished_at,started_at").order("started_at", { ascending: false }).limit(1),
     supabase.from("notifications").select("id", { count: "exact", head: true }).is("read_at", null),
@@ -25,8 +25,15 @@ export async function getDashboardData(days = 30) {
   for (const row of insightsResult.data ?? []) {
     const current = totals.get(row.ad_account_id) ?? { spend: 0, conversations: 0 };
     current.spend += number(row.spend); current.conversations += number(row.messaging_conversations); totals.set(row.ad_account_id, current);
-    const point = chart.get(row.insight_date) ?? { date: row.insight_date, spend: 0, conversations: 0 };
-    point.spend += number(row.spend); point.conversations += number(row.messaging_conversations); chart.set(row.insight_date, point);
+    const point = chart.get(row.insight_date) ?? { date: row.insight_date, spend: 0, conversations: 0, impressions: 0, hasRealData: false };
+    point.spend += number(row.spend); point.conversations += number(row.messaging_conversations);
+    if (point.impressions !== undefined) {
+      point.impressions += number(row.impressions);
+    }
+    if (number(row.spend) > 0 || number(row.impressions) > 0 || number(row.messaging_conversations) > 0) {
+      point.hasRealData = true;
+    }
+    chart.set(row.insight_date, point);
   }
   const accounts: AccountRow[] = (accountsResult.data ?? []).map((a) => ({ ...a, ...(totals.get(a.id) ?? { spend: 0, conversations: 0 }) }));
   const spend = accounts.reduce((sum, a) => sum + a.spend, 0);

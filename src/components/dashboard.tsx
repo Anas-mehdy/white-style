@@ -73,14 +73,18 @@ function Chart({ points, loading }: { points: ChartPoint[]; loading: boolean }) 
   const svgRef = useRef<SVGSVGElement | null>(null);
 
   if (!points || !points.length) {
-    return <div className="empty-state">لا توجد بيانات أداء.</div>;
+    return <div className="empty-state">لا توجد بيانات أداء للفترة المحددة.</div>;
   }
 
-  // Filter out incomplete today's data if it is zero
-  const todayStr = new Date().toISOString().slice(0, 10);
+  // Filter out incomplete today's data if it is zero/has no real delivery
+  const todayStrStr = new Date().toISOString().slice(0, 10);
+  const localToday = new Date();
+  const todayLocalStr = localToday.getFullYear() + "-" + String(localToday.getMonth() + 1).padStart(2, '0') + "-" + String(localToday.getDate()).padStart(2, '0');
+
   const filteredPoints = points.filter((p, idx) => {
     if (idx === points.length - 1) {
-      if (p.date === todayStr && p.spend === 0 && p.conversations === 0) {
+      const isToday = p.date === todayStrStr || p.date === todayLocalStr;
+      if (isToday && !p.hasRealData) {
         return false;
       }
     }
@@ -95,17 +99,23 @@ function Chart({ points, loading }: { points: ChartPoint[]; loading: boolean }) 
   const maxSpend = Math.max(...spends, 0);
   const maxConv = Math.max(...convs, 0);
 
+  // If all values are zero, show empty state instead of misleading flat line
+  if (maxSpend === 0 && maxConv === 0) {
+    return <div className="empty-state">جميع قيم الأداء (الإنفاق والمحادثات) تساوي صفرًا خلال هذه الفترة.</div>;
+  }
+
   // Scaled max to prevent lines touching the top of the chart
   const maxSpendScaled = maxSpend > 0 ? Math.ceil(maxSpend * 1.1) : 100;
   const maxConvScaled = maxConv > 0 ? Math.ceil(maxConv * 1.1) : 10;
 
-  // viewBox is 500x220. Margins: Left: 65, Right: 65, Top: 25, Bottom: 35
+  // viewBox is 500x150 (Reduced by ~31.8% from 220 for better layout balance).
+  // Margins: Left: 65, Right: 65, Top: 30 (gives space for title & axis headers), Bottom: 25
   const marginL = 65;
   const marginR = 65;
-  const marginT = 25;
-  const marginB = 35;
+  const marginT = 30;
+  const marginB = 25;
   const plotW = 500 - marginL - marginR;
-  const plotH = 220 - marginT - marginB;
+  const plotH = 150 - marginT - marginB; // 95 pixels
 
   const getX = (idx: number) => {
     if (activePoints.length <= 1) return marginL + plotW / 2;
@@ -254,7 +264,7 @@ function Chart({ points, loading }: { points: ChartPoint[]; loading: boolean }) 
 
       <svg
         ref={svgRef}
-        viewBox="0 0 500 220"
+        viewBox="0 0 500 150"
         width="100%"
         height="100%"
         preserveAspectRatio="xMidYMid meet"
@@ -262,11 +272,16 @@ function Chart({ points, loading }: { points: ChartPoint[]; loading: boolean }) 
         onMouseLeave={() => setHoveredIndex(null)}
         style={{ overflow: "visible" }}
       >
+        {/* Title */}
+        <text x="250" y="14" textAnchor="middle" fontSize="10.5" fontWeight="700" fill="var(--foreground)">
+          أداء الإنفاق والمحادثات خلال الفترة المحددة
+        </text>
+
         {/* Y Axis Titles */}
-        <text x={marginL - 8} y="15" textAnchor="end" fontSize="9" fontWeight="600" fill="var(--green)">
+        <text x={marginL - 8} y="26" textAnchor="end" fontSize="8" fontWeight="600" fill="var(--green)">
           الإنفاق (USD)
         </text>
-        <text x={500 - marginR + 8} y="15" textAnchor="start" fontSize="9" fontWeight="600" fill="var(--blue)">
+        <text x={500 - marginR + 8} y="26" textAnchor="start" fontSize="8" fontWeight="600" fill="var(--blue)">
           المحادثات
         </text>
 
@@ -279,11 +294,11 @@ function Chart({ points, loading }: { points: ChartPoint[]; loading: boolean }) 
             <g key={lvl}>
               <line x1={marginL} y1={y} x2={500 - marginR} y2={y} className="chart-grid-line" />
               {/* Left Y label */}
-              <text x={marginL - 8} y={y + 3} textAnchor="end" fontSize="8" fill="var(--muted)">
+              <text x={marginL - 8} y={y + 3} textAnchor="end" fontSize="7.5" fill="var(--muted)">
                 {new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(spendVal)}
               </text>
               {/* Right Y label */}
-              <text x={500 - marginR + 8} y={y + 3} textAnchor="start" fontSize="8" fill="var(--muted)">
+              <text x={500 - marginR + 8} y={y + 3} textAnchor="start" fontSize="7.5" fill="var(--muted)">
                 {Math.round(convVal).toLocaleString("en-US")}
               </text>
             </g>
@@ -301,11 +316,19 @@ function Chart({ points, loading }: { points: ChartPoint[]; loading: boolean }) 
           </>
         )}
 
-        {/* Render dots if single point */}
+        {/* Daily dots */}
+        {activePoints.length > 0 && activePoints.map((p, i) => (
+          <g key={i}>
+            <circle cx={getX(i)} cy={getYSpend(p.spend)} r="2" className="chart-dot-spend" />
+            <circle cx={getX(i)} cy={getYConv(p.conversations)} r="2" className="chart-dot-conv" />
+          </g>
+        ))}
+
+        {/* Render highlight dots if single point */}
         {activePoints.length === 1 && (
           <>
-            <circle cx={getX(0)} cy={getYSpend(activePoints[0].spend)} r="4" fill="var(--green)" />
-            <circle cx={getX(0)} cy={getYConv(activePoints[0].conversations)} r="4" fill="var(--blue)" />
+            <circle cx={getX(0)} cy={getYSpend(activePoints[0].spend)} r="3.5" fill="var(--green)" />
+            <circle cx={getX(0)} cy={getYConv(activePoints[0].conversations)} r="3.5" fill="var(--blue)" />
           </>
         )}
 
@@ -314,9 +337,9 @@ function Chart({ points, loading }: { points: ChartPoint[]; loading: boolean }) 
           <text
             key={idx}
             x={getX(idx)}
-            y={marginT + plotH + 16}
+            y={marginT + plotH + 14}
             textAnchor="middle"
-            fontSize="8.5"
+            fontSize="8"
             fill="var(--muted)"
             className="ltr-val"
           >
@@ -328,25 +351,26 @@ function Chart({ points, loading }: { points: ChartPoint[]; loading: boolean }) 
         {hoveredIndex !== null && activePoint && (
           <>
             <line x1={hoverX} y1={marginT} x2={hoverX} y2={marginT + plotH} stroke="var(--border)" strokeWidth="1" strokeDasharray="3 3" />
-            <circle cx={hoverX} cy={hoverYSpend} r="4.5" className="chart-dot-spend" />
-            <circle cx={hoverX} cy={hoverYConv} r="4.5" className="chart-dot-conv" />
+            <circle cx={hoverX} cy={hoverYSpend} r="3.5" className="chart-dot-spend" style={{ strokeWidth: "2px" }} />
+            <circle cx={hoverX} cy={hoverYConv} r="3.5" className="chart-dot-conv" style={{ strokeWidth: "2px" }} />
           </>
         )}
       </svg>
 
       <div className="chart-legend">
         <div className="chart-legend-item">
-          <span style={{ width: "10px", height: "10px", borderRadius: "50%", background: "var(--green)", display: "inline-block" }}></span>
+          <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: "var(--green)", display: "inline-block" }}></span>
           <span>الإنفاق: <strong>USD</strong></span>
         </div>
         <div className="chart-legend-item">
-          <span style={{ width: "10px", height: "10px", borderRadius: "50%", background: "var(--blue)", display: "inline-block" }}></span>
+          <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: "var(--blue)", display: "inline-block" }}></span>
           <span>المحادثات: <strong>عدد المحادثات</strong></span>
         </div>
       </div>
     </div>
   );
 }
+
 
 type Data = Awaited<ReturnType<typeof import("@/lib/dashboard-data").getDashboardData>>;
 type Run = {
@@ -552,6 +576,13 @@ export function DashboardClient({ initial }: { initial: Data }) {
 }
 
 export function Table({ accounts }: { accounts: AccountRow[] }) {
+  const isRealMetaId = (id: string | null | undefined): boolean => {
+    if (!id) return false;
+    const trimmed = id.trim();
+    if (trimmed.includes("pending") || trimmed.includes("demo")) return false;
+    return /^\d+$/.test(trimmed);
+  };
+
   const formatLastSynced = (dateStr: string | null, timezone?: string) => {
     if (!dateStr) return "لم تتم المزامنة";
     const d = new Date(dateStr);
@@ -596,17 +627,23 @@ export function Table({ accounts }: { accounts: AccountRow[] }) {
             {accounts.map((a) => {
               const isPending = a.connection_status === "pending";
               const isConnected = a.connection_status === "connected";
+              const hasRealId = isRealMetaId(a.meta_account_id);
 
               let badgeClass = "badge--failed";
-              let badgeText = a.connection_status;
+              let badgeText = "فشل الاتصال";
 
               if (isConnected) {
                 badgeClass = "badge--connected";
                 badgeText = "متصل";
               } else if (isPending) {
                 badgeClass = "badge--pending";
-                badgeText = "قيد الانتظار";
-              } else {
+                if (hasRealId) {
+                  badgeText = "متصل — لم تتم مزامنته";
+                } else {
+                  badgeText = "بانتظار الربط";
+                }
+              } else if (a.connection_status === "expired" || a.connection_status === "error") {
+                badgeClass = "badge--failed";
                 badgeText = "فشل الاتصال";
               }
 
@@ -615,9 +652,15 @@ export function Table({ accounts }: { accounts: AccountRow[] }) {
                   <td className="account-name-cell">
                     <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
                       <span style={{ fontWeight: 600 }}>{a.name}</span>
-                      <span className="ltr-val" style={{ fontSize: "10px", color: "var(--muted)", alignSelf: "flex-start" }}>
-                        {a.meta_account_id}
-                      </span>
+                      {hasRealId ? (
+                        <span className="ltr-val" style={{ fontSize: "10px", color: "var(--muted)", alignSelf: "flex-start" }}>
+                          {a.meta_account_id}
+                        </span>
+                      ) : (
+                        <span style={{ fontSize: "10px", color: "var(--muted)", alignSelf: "flex-start" }}>
+                          لم يتم ربط الحساب بعد
+                        </span>
+                      )}
                     </div>
                   </td>
                   <td>
