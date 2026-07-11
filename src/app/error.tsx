@@ -1,0 +1,1 @@
+"use client"; export default function Error({reset}:{reset:()=>void}){return <main className="main-content"><div className="error-state">تعذر تحميل البيانات من Supabase.<button onClick={reset}>إعادة المحاولة</button></div></main>}

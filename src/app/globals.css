@@ -239,6 +239,24 @@ button { cursor: pointer; }
 .action-status--protected { background: #f0f2f1; color: #67746e; }
 
 .mobile-overlay { display: none; }
+.sidebar .nav-item { text-decoration: none; }
+.filters { display: flex; gap: 10px; margin: 0 0 16px; }
+.filters input, .filters select { border: 1px solid var(--border); background: var(--surface); border-radius: 10px; padding: 10px 12px; color: var(--foreground); }
+.filters input { min-width: 260px; }
+.data-table { overflow-x: auto; }
+.data-table table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.data-table th, .data-table td { padding: 12px 9px; border-bottom: 1px solid var(--border); text-align: right; vertical-align: top; max-width: 300px; overflow-wrap: anywhere; }
+.data-table th { color: var(--muted); font-weight: 500; white-space: nowrap; }
+.empty-state, .loading-state, .error-state { color: var(--muted); padding: 30px 12px; text-align: center; }
+.error-state { color: var(--red); }
+.error-state button { margin: 12px; border: 1px solid var(--border); background: var(--surface); border-radius: 8px; padding: 8px 12px; }
+.simple-chart { color: var(--blue); width: 100%; height: 180px; margin-top: 22px; }
+.settings-card { margin-bottom: 14px; }
+.settings-card h2 { font-size: 15px; margin-top: 0; }
+.settings-card p { color: var(--muted); font-size: 12px; }
+.settings-card dl { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 20px; margin: 18px 0 0; font-size: 12px; }
+.settings-card dt { color: var(--muted); }
+.settings-card dd { margin: 0; font-weight: 600; }
 
 @media (max-width: 1180px) {
   .agent-command-card { grid-template-columns: minmax(0, 1fr) auto; }

@@ -1,0 +1,1 @@
+import { Shell } from "@/components/dashboard"; import { DecisionsPage } from "@/components/data-pages"; import { getPageData } from "@/lib/dashboard-data"; export const dynamic="force-dynamic"; export default async function Page(){const d=await getPageData();return <Shell><DecisionsPage rows={d.decisions} accounts={d.accounts}/></Shell>}
