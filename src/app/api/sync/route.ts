@@ -23,7 +23,8 @@ export async function POST(request: Request) {
     if (!response.ok) return NextResponse.json({ error: "رفض n8n طلب المزامنة." }, { status: 502 });
     const contentType = response.headers.get("content-type") ?? "";
     const payload = contentType.includes("application/json") ? await response.json().catch(() => ({})) : {};
-    return NextResponse.json({ accepted: payload.accepted ?? true, execution_id: payload.execution_id ?? null, status: payload.status ?? "running", request_id: requestId, started_after: startedAfter }, { status: 202 });
+    console.info("[sync-start]", { request_id: requestId, started_after: startedAfter });
+    return NextResponse.json({ accepted: true, status: "started", started_after: startedAfter, request_id: requestId, execution_id: payload.execution_id ?? null }, { status: 202, headers: { "cache-control": "no-store" } });
   } catch (error) {
     const message = error instanceof Error && error.name === "AbortError" ? "انتهت مهلة الاتصال بـn8n." : "تعذر بدء مزامنة n8n.";
     return NextResponse.json({ error: message }, { status: 502 });
