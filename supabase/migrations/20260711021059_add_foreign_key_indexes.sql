@@ -1,0 +1,15 @@
+create index ad_insights_ad_set_idx on public.ad_insights_daily(ad_set_id);
+create index ad_insights_campaign_idx on public.ad_insights_daily(campaign_id);
+create index agent_actions_decision_idx on public.agent_actions(decision_id);
+create index agent_configs_account_idx on public.agent_configs(ad_account_id);
+create index agent_configs_updated_by_idx on public.agent_configs(updated_by);
+create index agent_decisions_account_idx on public.agent_decisions(ad_account_id);
+create index agent_decisions_ad_idx on public.agent_decisions(ad_id);
+create index agent_decisions_ad_set_idx on public.agent_decisions(ad_set_id);
+create index agent_decisions_campaign_idx on public.agent_decisions(campaign_id);
+create index meta_ad_sets_campaign_idx on public.meta_ad_sets(campaign_id);
+create index meta_ads_ad_set_idx on public.meta_ads(ad_set_id);
+create index meta_ads_campaign_idx on public.meta_ads(campaign_id);
+create index notifications_organization_idx on public.notifications(organization_id);
+create index sync_runs_account_idx on public.sync_runs(ad_account_id);
+create index sync_runs_organization_idx on public.sync_runs(organization_id);

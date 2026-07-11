@@ -1,36 +1,44 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# White Style Smart Agent
 
-## Getting Started
+منصة عربية ذكية لإدارة وتحسين حسابات **white style** الإعلانية على Meta.
 
-First, run the development server:
+## الوضع الحالي
+
+- Dashboard عربي RTL ببيانات تجريبية مبنية على تقارير الحسابين الحاليين.
+- محرك قرارات يدعم الإيقاف والتخفيض والزيادة والمراقبة والحماية.
+- Autopilot للتنفيذ الذاتي ضمن حدود مالية وفترات تهدئة وKill Switch.
+- Supabase schema متعدد العملاء مع RLS وسجل قرارات وتنفيذ وتحقق وتراجع.
+- نقاط API محلية لاختبار صحة النظام ومحرك القرار.
+
+## التشغيل
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
+pnpm install
 pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+ثم افتح `http://localhost:3000`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## اختبار محرك القرار
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+أرسل طلب `POST` إلى `/api/agent/evaluate`:
 
-## Learn More
+```json
+{
+  "entityId": "ad-demo-1",
+  "spend": 20,
+  "results": 0,
+  "costPerResult": 0,
+  "benchmarkCost": 1.5,
+  "ageHours": 72,
+  "dataFreshnessMinutes": 10
+}
+```
 
-To learn more about Next.js, take a look at the following resources:
+## الإعدادات
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+انسخ `.env.example` إلى `.env.local` عند توفر مشروع Supabase وبيانات Meta وn8n وTelegram.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+ملفات قاعدة البيانات داخل `supabase/`، وتشمل migration أولي وseed خاص بمنظمة white style.
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+مشروع Supabase المتصل: `wsmbaueobuzilyagtnuq` في منطقة `eu-central-1`.
