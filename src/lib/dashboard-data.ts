@@ -12,7 +12,7 @@ export async function getDashboardData(days = 30) {
   const from = since(days);
   const [accountsResult, insightsResult, decisionsResult, runsResult, notificationsResult, configResult] = await Promise.all([
     supabase.from("meta_ad_accounts").select("id,name,meta_account_id,currency,timezone_name,connection_status,last_synced_at").order("name"),
-    supabase.from("ad_insights_daily").select("ad_account_id,insight_date,spend,messaging_conversations").gte("insight_date", from).order("insight_date"),
+    supabase.from("ad_insights_daily").select("ad_account_id,organization_id,insight_date,spend,messaging_conversations,cost_per_conversation").gte("insight_date", from).order("insight_date"),
     supabase.from("agent_decisions").select("id").gte("created_at", from),
     supabase.from("sync_runs").select("status,finished_at,started_at").order("started_at", { ascending: false }).limit(1),
     supabase.from("notifications").select("id", { count: "exact", head: true }).is("read_at", null),
@@ -31,7 +31,9 @@ export async function getDashboardData(days = 30) {
   const accounts: AccountRow[] = (accountsResult.data ?? []).map((a) => ({ ...a, ...(totals.get(a.id) ?? { spend: 0, conversations: 0 }) }));
   const spend = accounts.reduce((sum, a) => sum + a.spend, 0);
   const conversations = accounts.reduce((sum, a) => sum + a.conversations, 0);
-  return { accounts, chart: [...chart.values()], stats: { spend, conversations, cost: conversations ? spend / conversations : null, monitoredSpend: spend, connected: accounts.filter((a) => a.connection_status === "connected").length, decisions: decisionsResult.data?.length ?? 0, alerts: notificationsResult.count ?? 0, lastSync: runsResult.data?.[0] ?? null, config: configResult.data?.[0] ?? null } };
+  const debugCounts = { accountsCount: accountsResult.data?.length ?? 0, insightsCount: insightsResult.data?.length ?? 0, syncRunsCount: runsResult.data?.length ?? 0, decisionsCount: decisionsResult.data?.length ?? 0, notificationsCount: notificationsResult.count ?? 0, configsCount: configResult.data?.length ?? 0 };
+  const debugErrors = { meta_ad_accounts: accountsResult.error ? { code: accountsResult.error.code, message: accountsResult.error.message } : null, ad_insights_daily: insightsResult.error ? { code: insightsResult.error.code, message: insightsResult.error.message } : null, sync_runs: runsResult.error ? { code: runsResult.error.code, message: runsResult.error.message } : null, agent_decisions: decisionsResult.error ? { code: decisionsResult.error.code, message: decisionsResult.error.message } : null, notifications: notificationsResult.error ? { code: notificationsResult.error.code, message: notificationsResult.error.message } : null, agent_configs: configResult.error ? { code: configResult.error.code, message: configResult.error.message } : null };
+  return { accounts, chart: [...chart.values()], stats: { spend, conversations, cost: conversations ? spend / conversations : null, monitoredSpend: spend, connected: accounts.filter((a) => a.connection_status === "connected").length, decisions: decisionsResult.data?.length ?? 0, alerts: notificationsResult.count ?? 0, lastSync: runsResult.data?.[0] ?? null, config: configResult.data?.[0] ?? null }, debugCounts, debugErrors };
 }
 
 export async function getPageData() {
