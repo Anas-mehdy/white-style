@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Activity, BrainCircuit, LayoutDashboard, RefreshCw, Settings2, ShieldCheck, Target } from "lucide-react";
+import { Activity, BrainCircuit, LayoutDashboard, RefreshCw, Settings2, ShieldCheck, Target, Sun, Moon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { AccountRow, ChartPoint } from "@/lib/dashboard-data";
 
@@ -57,13 +57,53 @@ export function Shell({ children }: { children: React.ReactNode }) {
 
 export function PageHeader({ title }: { title: string }) {
   const r = useRouter();
+  const [theme, setTheme] = useState<"dark" | "light">("dark");
+
+  useEffect(() => {
+    const saved = localStorage.getItem("theme") as "dark" | "light";
+    const initialTheme = saved || "dark";
+    document.documentElement.setAttribute("data-theme", initialTheme);
+    if (initialTheme !== "dark") {
+      setTimeout(() => {
+        setTheme(initialTheme);
+      }, 0);
+    }
+  }, []);
+
+  const toggleTheme = () => {
+    const next = theme === "dark" ? "light" : "dark";
+    setTheme(next);
+    localStorage.setItem("theme", next);
+    document.documentElement.setAttribute("data-theme", next);
+    window.dispatchEvent(new Event("theme-change"));
+  };
+
+  useEffect(() => {
+    const syncTheme = () => {
+      const current = (localStorage.getItem("theme") || "dark") as "dark" | "light";
+      setTheme(current);
+    };
+    window.addEventListener("theme-change", syncTheme);
+    return () => window.removeEventListener("theme-change", syncTheme);
+  }, []);
+
   return (
     <header className="topbar">
       <h1>{title}</h1>
-      <button className="sync-button" onClick={() => r.refresh()}>
-        <RefreshCw size={16} />
-        تحديث الصفحة
-      </button>
+      <div className="topbar-actions" style={{ display: "flex", gap: "10px" }}>
+        <button 
+          className="sync-button" 
+          onClick={toggleTheme} 
+          title={theme === "dark" ? "الوضع المضيء" : "الوضع المظلم"}
+          style={{ width: "38px", height: "38px", padding: 0, display: "grid", placeItems: "center" }}
+        >
+          {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
+        </button>
+        <button className="sync-button" onClick={() => r.refresh()}>
+          <RefreshCw size={16} />
+          تحديث الصفحة
+        </button>
+      </div>
     </header>
   );
 }
@@ -71,6 +111,22 @@ export function PageHeader({ title }: { title: string }) {
 function Chart({ points, loading }: { points: ChartPoint[]; loading: boolean }) {
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
+  const [theme, setTheme] = useState<"dark" | "light">("dark");
+
+  useEffect(() => {
+    const current = (localStorage.getItem("theme") || "dark") as "dark" | "light";
+    if (current !== "dark") {
+      setTimeout(() => {
+        setTheme(current);
+      }, 0);
+    }
+    const syncTheme = () => {
+      const updated = (localStorage.getItem("theme") || "dark") as "dark" | "light";
+      setTheme(updated);
+    };
+    window.addEventListener("theme-change", syncTheme);
+    return () => window.removeEventListener("theme-change", syncTheme);
+  }, []);
 
   if (!points || !points.length) {
     return <div className="empty-state">لا توجد بيانات أداء للفترة المحددة.</div>;
@@ -200,8 +256,8 @@ function Chart({ points, loading }: { points: ChartPoint[]; loading: boolean }) 
     const tooltipStyle: React.CSSProperties = {
       position: "absolute",
       top: "10px",
-      background: "rgba(16, 26, 22, 0.96)",
-      color: "#fff",
+      background: theme === "light" ? "rgba(255, 255, 255, 0.96)" : "rgba(15, 23, 42, 0.96)",
+      color: theme === "light" ? "#0f172a" : "#f8fafc",
       padding: "10px 14px",
       borderRadius: "8px",
       border: "1px solid var(--border)",
@@ -240,13 +296,13 @@ function Chart({ points, loading }: { points: ChartPoint[]; loading: boolean }) 
         </div>
         <div style={{ display: "flex", justifyContent: "space-between", gap: "12px", marginBottom: "4px" }}>
           <span>الإنفاق:</span>
-          <strong className="ltr-val" style={{ color: "var(--green)" }}>
+          <strong className="ltr-val" style={{ color: "var(--chart-spend)" }}>
             {money(activePoint.spend)}
           </strong>
         </div>
         <div style={{ display: "flex", justifyContent: "space-between", gap: "12px" }}>
           <span>المحادثات:</span>
-          <strong className="ltr-val" style={{ color: "var(--blue)" }}>
+          <strong className="ltr-val" style={{ color: "var(--chart-conv)" }}>
             {formatNumber(activePoint.conversations)}
           </strong>
         </div>
@@ -278,10 +334,10 @@ function Chart({ points, loading }: { points: ChartPoint[]; loading: boolean }) 
         </text>
 
         {/* Y Axis Titles */}
-        <text x={marginL - 8} y="26" textAnchor="end" fontSize="8" fontWeight="600" fill="var(--green)">
+        <text x={marginL - 8} y="26" textAnchor="end" fontSize="8" fontWeight="600" fill="var(--chart-spend)">
           الإنفاق (USD)
         </text>
-        <text x={500 - marginR + 8} y="26" textAnchor="start" fontSize="8" fontWeight="600" fill="var(--blue)">
+        <text x={500 - marginR + 8} y="26" textAnchor="start" fontSize="8" fontWeight="600" fill="var(--chart-conv)">
           المحادثات
         </text>
 
@@ -359,11 +415,11 @@ function Chart({ points, loading }: { points: ChartPoint[]; loading: boolean }) 
 
       <div className="chart-legend">
         <div className="chart-legend-item">
-          <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: "var(--green)", display: "inline-block" }}></span>
+          <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: "var(--chart-spend)", display: "inline-block" }}></span>
           <span>الإنفاق: <strong>USD</strong></span>
         </div>
         <div className="chart-legend-item">
-          <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: "var(--blue)", display: "inline-block" }}></span>
+          <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: "var(--chart-conv)", display: "inline-block" }}></span>
           <span>المحادثات: <strong>عدد المحادثات</strong></span>
         </div>
       </div>
