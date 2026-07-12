@@ -340,7 +340,7 @@ export function DecisionsPage({ rows }: { rows: RecordRow[] }) {
       <header className="topbar">
         <div className="topbar-title" style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
           <h1>قرارات Agent</h1>
-          <p style={{ margin: 0, color: "var(--muted)", fontSize: "12px" }}>متابعة قرارات النظام والتنفيذ الفعلي على الحملات الإعلانية</p>
+          <p style={{ margin: 0, color: "var(--muted)", fontSize: "14px" }}>متابعة قرارات النظام والتنفيذ الفعلي على الحملات الإعلانية</p>
         </div>
         <div className="topbar-actions">
           <button className="sync-button" onClick={() => rtr.refresh()}>
@@ -379,15 +379,15 @@ export function DecisionsPage({ rows }: { rows: RecordRow[] }) {
         <article className="kpi-card">
           <div className="kpi-label">التغييرات المنفذة اليوم</div>
           <div style={{ display: "flex", flexDirection: "column", gap: "3px", marginTop: "4px" }}>
-            <div style={{ fontSize: "10.5px", color: "var(--muted)", display: "flex", justifyContent: "space-between" }}>
+            <div style={{ fontSize: "12.5px", color: "var(--muted)", display: "flex", justifyContent: "space-between" }}>
               <span>خفض الميزانية:</span>
               <strong style={{ color: "var(--foreground)" }}>{kpiStats.budgetDecreased}</strong>
             </div>
-            <div style={{ fontSize: "10.5px", color: "var(--muted)", display: "flex", justifyContent: "space-between" }}>
+            <div style={{ fontSize: "12.5px", color: "var(--muted)", display: "flex", justifyContent: "space-between" }}>
               <span>زيادة الميزانية:</span>
               <strong style={{ color: "var(--foreground)" }}>{kpiStats.budgetIncreased}</strong>
             </div>
-            <div style={{ fontSize: "10.5px", color: "var(--muted)", display: "flex", justifyContent: "space-between" }}>
+            <div style={{ fontSize: "12.5px", color: "var(--muted)", display: "flex", justifyContent: "space-between" }}>
               <span>إيقاف:</span>
               <strong style={{ color: "var(--foreground)" }}>{kpiStats.paused}</strong>
             </div>
@@ -501,15 +501,15 @@ export function DecisionsPage({ rows }: { rows: RecordRow[] }) {
       {/* Main Content Area */}
       {hasNoDecisionsAtAll ? (
         <article className="panel" style={{ textAlign: "center", padding: "40px 20px" }}>
-          <div style={{ display: "inline-flex", alignItems: "center", gap: "8px", background: "var(--amber-soft)", color: "var(--amber)", padding: "6px 12px", borderRadius: "20px", fontSize: "11px", fontWeight: "600", marginBottom: "20px" }}>
+          <div style={{ display: "inline-flex", alignItems: "center", gap: "8px", background: "var(--amber-soft)", color: "var(--amber)", padding: "6px 12px", borderRadius: "20px", fontSize: "13px", fontWeight: "600", marginBottom: "20px" }}>
             <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "currentColor" }}></span>
             لا توجد قرارات حتى الآن
           </div>
-          <h2 style={{ fontSize: "16px", marginBottom: "12px", fontWeight: "600" }}>لا توجد قرارات مسجلة في قاعدة البيانات حاليًا.</h2>
+          <h2 style={{ fontSize: "18px", marginBottom: "12px", fontWeight: "600" }}>لا توجد قرارات مسجلة في قاعدة البيانات حاليًا.</h2>
         </article>
       ) : filteredRows.length === 0 ? (
         <article className="panel" style={{ textAlign: "center", padding: "30px" }}>
-          <div style={{ color: "var(--muted)", fontSize: "13px" }}>
+          <div style={{ color: "var(--muted)", fontSize: "15px" }}>
             {activeTab === "failed" ? "لا توجد عمليات فاشلة" : (activeTab === "current" ? "لا توجد قرارات بانتظار التنفيذ" : "لا توجد نتائج مطابقة للفلاتر الحالية")}
           </div>
         </article>
@@ -581,7 +581,7 @@ export function DecisionsPage({ rows }: { rows: RecordRow[] }) {
                         <td>
                           <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
                             <span style={{ fontWeight: 600 }}>{target.name}</span>
-                            <span style={{ fontSize: "9.5px", color: "var(--muted)" }}>{target.label}</span>
+                            <span style={{ fontSize: "11.5px", color: "var(--muted)" }}>{target.label}</span>
                           </div>
                         </td>
                         <td className="account-name-cell">{name(r)}</td>
@@ -594,7 +594,7 @@ export function DecisionsPage({ rows }: { rows: RecordRow[] }) {
                               WebkitBoxOrient: "vertical", 
                               overflow: "hidden", 
                               lineHeight: "1.5",
-                              fontSize: "11px",
+                              fontSize: "13px",
                               color: "var(--muted)"
                             }}
                           >
@@ -610,7 +610,7 @@ export function DecisionsPage({ rows }: { rows: RecordRow[] }) {
                           </div>
                         </td>
                         <td>
-                          <span style={{ fontSize: "11px", fontWeight: "500" }}>{changeText}</span>
+                          <span style={{ fontSize: "13px", fontWeight: "500" }}>{changeText}</span>
                         </td>
                         <td>{getStatusBadge(status)}</td>
                         <td className="hide-tablet">
@@ -622,7 +622,7 @@ export function DecisionsPage({ rows }: { rows: RecordRow[] }) {
                         <td>
                           <button 
                             className="sync-button" 
-                            style={{ padding: "6px 10px", fontSize: "10.5px" }}
+                            style={{ padding: "6px 10px", fontSize: "12.5px" }}
                             onClick={() => {
                               setSelectedRow(r);
                               setIsTechOpen(false);
@@ -676,7 +676,7 @@ export function DecisionsPage({ rows }: { rows: RecordRow[] }) {
                 <article key={String(r.id)} className="mobile-card">
                   <div className="mobile-card-row">
                     <span className={`badge ${decBadgeClass}`}>{translateDecision(r.decision)}</span>
-                    <span className="ltr-val" style={{ fontSize: "10px", color: "var(--muted)" }}>{formatArabicDate(r.created_at)}</span>
+                    <span className="ltr-val" style={{ fontSize: "12px", color: "var(--muted)" }}>{formatArabicDate(r.created_at)}</span>
                   </div>
                   
                   <div style={{ margin: "4px 0" }}>
@@ -698,7 +698,7 @@ export function DecisionsPage({ rows }: { rows: RecordRow[] }) {
 
                   <div className="mobile-card-row">
                     <span className="mobile-card-label">التغيير</span>
-                    <strong className="mobile-card-val" style={{ fontSize: "11px" }}>{changeText}</strong>
+                    <strong className="mobile-card-val" style={{ fontSize: "13px" }}>{changeText}</strong>
                   </div>
 
                   <div className="mobile-card-row">
@@ -792,13 +792,13 @@ export function DecisionsPage({ rows }: { rows: RecordRow[] }) {
                 {/* Section B: سبب القرار */}
                 <div className="drawer-section">
                   <div className="drawer-section-title">سبب القرار</div>
-                  <p style={{ fontSize: "12px", lineHeight: "1.6", color: "var(--muted)", margin: "0 0 10px", background: "var(--surface-soft)", padding: "12px", borderRadius: "8px", border: "1px solid var(--border)" }}>
+                  <p style={{ fontSize: "14px", lineHeight: "1.6", color: "var(--muted)", margin: "0 0 10px", background: "var(--surface-soft)", padding: "12px", borderRadius: "8px", border: "1px solid var(--border)" }}>
                     {String(r.reason || "—")}
                   </p>
                   
                   {metrics && (
                     <div className="drawer-section">
-                      <div className="drawer-section-title" style={{ fontSize: "10.5px", border: 0, padding: 0 }}>مؤشرات أداء الحملة المستهدفة وقت القرار:</div>
+                      <div className="drawer-section-title" style={{ fontSize: "12px", border: 0, padding: 0 }}>مؤشرات أداء الحملة المستهدفة وقت القرار:</div>
                       <div className="metrics-card-grid">
                         <div className="metric-mini-card">
                           <div className="metric-mini-label" title="تكلفة المحادثة الحالية">تكلفة المحادثة</div>
@@ -896,7 +896,7 @@ export function DecisionsPage({ rows }: { rows: RecordRow[] }) {
                       </div>
                     </div>
                   ) : (
-                    <div style={{ fontSize: "12px", color: "var(--muted)" }}>لا توجد تفاصيل تغيير لهذا القرار.</div>
+                    <div style={{ fontSize: "14px", color: "var(--muted)" }}>لا توجد تفاصيل تغيير لهذا القرار.</div>
                   )}
                 </div>
                 
@@ -950,7 +950,7 @@ export function DecisionsPage({ rows }: { rows: RecordRow[] }) {
                 {latestAction?.status === "failed" && (
                   <div className="drawer-section" style={{ background: "var(--red-soft)", border: "1px solid var(--red)", padding: "12px", borderRadius: "8px" }}>
                     <div className="drawer-section-title" style={{ color: "var(--red)", border: 0, padding: 0, marginBottom: "6px" }}>تفاصيل الخطأ</div>
-                    <div style={{ fontSize: "12px", color: "var(--red)", fontWeight: "600", display: "flex", gap: "6px", alignItems: "center" }}>
+                    <div style={{ fontSize: "14px", color: "var(--red)", fontWeight: "600", display: "flex", gap: "6px", alignItems: "center" }}>
                       <AlertOctagon size={16} />
                       <span>{translateMetaError(latestAction.error_code, latestAction.error_message)}</span>
                     </div>
@@ -1001,7 +1001,7 @@ export function ExecutionPage({ rows }: { rows: RecordRow[] }) {
       <header className="topbar">
         <div className="topbar-title" style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
           <h1>سجل التنفيذ</h1>
-          <p style={{ margin: 0, color: "var(--muted)", fontSize: "12px" }}>عمليات وتعديلات الميزانية والحالة المنفذة بواسطة النظام</p>
+          <p style={{ margin: 0, color: "var(--muted)", fontSize: "14px" }}>عمليات وتعديلات الميزانية والحالة المنفذة بواسطة النظام</p>
         </div>
         <div className="topbar-actions">
           <button className="sync-button" onClick={() => rtr.refresh()}>
@@ -1063,7 +1063,7 @@ export function ExecutionPage({ rows }: { rows: RecordRow[] }) {
                       <td>
                         <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
                           <span style={{ fontWeight: 600 }}>{target.name}</span>
-                          <span style={{ fontSize: "9.5px", color: "var(--muted)" }}>{target.label}</span>
+                          <span style={{ fontSize: "11.5px", color: "var(--muted)" }}>{target.label}</span>
                         </div>
                       </td>
                       <td className="account-name-cell">
@@ -1083,7 +1083,7 @@ export function ExecutionPage({ rows }: { rows: RecordRow[] }) {
                       </td>
                       <td style={{ maxWidth: "160px", whiteSpace: "normal" }}>
                         {r.status === "failed" ? (
-                          <span style={{ fontSize: "11px", color: "var(--red)" }}>
+                          <span style={{ fontSize: "13px", color: "var(--red)" }}>
                             {translateMetaError(r.error_code, r.error_message)}
                           </span>
                         ) : "—"}
@@ -1091,7 +1091,7 @@ export function ExecutionPage({ rows }: { rows: RecordRow[] }) {
                       <td>
                         <button 
                           className="sync-button" 
-                          style={{ padding: "6px 10px", fontSize: "10.5px" }}
+                          style={{ padding: "6px 10px", fontSize: "12.5px" }}
                           onClick={() => {
                             // Map action back to a decision-like object for details drawer reuse
                             const decisionRow = decision ? {
@@ -1146,7 +1146,7 @@ export function ExecutionPage({ rows }: { rows: RecordRow[] }) {
             <article key={String(r.id)} className="mobile-card">
               <div className="mobile-card-row">
                 <span className={`badge ${decBadgeClass}`}>{translateDecision(actionType)}</span>
-                <span className="ltr-val" style={{ fontSize: "10px", color: "var(--muted)" }}>{formatArabicDate(r.created_at)}</span>
+                <span className="ltr-val" style={{ fontSize: "12px", color: "var(--muted)" }}>{formatArabicDate(r.created_at)}</span>
               </div>
               
               <div style={{ margin: "4px 0" }}>
@@ -1267,7 +1267,7 @@ export function ExecutionPage({ rows }: { rows: RecordRow[] }) {
                 {r.reason && r.reason !== "تم التنفيذ بشكل مباشر بدون تفاصيل القرار الحالية" && (
                   <div className="drawer-section">
                     <div className="drawer-section-title">السبب والتحليل الداعم</div>
-                    <p style={{ fontSize: "12px", lineHeight: "1.6", color: "var(--muted)", margin: 0, background: "var(--surface-soft)", padding: "12px", borderRadius: "8px", border: "1px solid var(--border)" }}>
+                    <p style={{ fontSize: "14px", lineHeight: "1.6", color: "var(--muted)", margin: 0, background: "var(--surface-soft)", padding: "12px", borderRadius: "8px", border: "1px solid var(--border)" }}>
                       {String(r.reason)}
                     </p>
                   </div>
@@ -1298,7 +1298,7 @@ export function ExecutionPage({ rows }: { rows: RecordRow[] }) {
                       </div>
                       <div className="info-item">
                         <div className="info-label">مفتاح المطابقة (Idempotency)</div>
-                        <div className="info-value" style={{ fontSize: "10.5px", fontFamily: "monospace", overflow: "hidden", textOverflow: "ellipsis" }}>
+                        <div className="info-value" style={{ fontSize: "12px", fontFamily: "monospace", overflow: "hidden", textOverflow: "ellipsis" }}>
                           {latestAction?.idempotency_key ? String(latestAction.idempotency_key) : "—"}
                         </div>
                       </div>
@@ -1329,7 +1329,7 @@ export function ExecutionPage({ rows }: { rows: RecordRow[] }) {
                       </div>
                     </div>
                   ) : (
-                    <div style={{ fontSize: "12px", color: "var(--muted)" }}>لا توجد تعديلات إضافية للتنفيذ.</div>
+                    <div style={{ fontSize: "14px", color: "var(--muted)" }}>لا توجد تعديلات إضافية للتنفيذ.</div>
                   )}
                 </div>
 
@@ -1337,7 +1337,7 @@ export function ExecutionPage({ rows }: { rows: RecordRow[] }) {
                 {latestAction?.status === "failed" && (
                   <div className="drawer-section" style={{ background: "var(--red-soft)", border: "1px solid var(--red)", padding: "12px", borderRadius: "8px" }}>
                     <div className="drawer-section-title" style={{ color: "var(--red)", border: 0, padding: 0, marginBottom: "6px" }}>تفاصيل الخطأ</div>
-                    <div style={{ fontSize: "12px", color: "var(--red)", fontWeight: "600", display: "flex", gap: "6px", alignItems: "center" }}>
+                    <div style={{ fontSize: "14px", color: "var(--red)", fontWeight: "600", display: "flex", gap: "6px", alignItems: "center" }}>
                       <AlertOctagon size={16} />
                       <span>{translateMetaError(latestAction.error_code, latestAction.error_message)}</span>
                     </div>
@@ -1413,48 +1413,48 @@ export function SafetyPage({ rows }: { rows: RecordRow[] }) {
 
         return (
           <article className="panel settings-card" key={String(r.id)} style={{ marginBottom: "24px" }}>
-            <h2 style={{ fontSize: "15px", fontWeight: "600", borderBottom: "1px solid var(--border)", paddingBottom: "12px", marginBottom: "20px" }}>
+            <h2 style={{ fontSize: "19px", fontWeight: "600", borderBottom: "1px solid var(--border)", paddingBottom: "12px", marginBottom: "20px" }}>
               {configName}
             </h2>
             
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "16px" }}>
               
               <div style={{ background: "var(--surface-soft)", padding: "14px", borderRadius: "10px", border: "1px solid var(--border)" }}>
-                <div style={{ color: "var(--muted)", fontSize: "11px", marginBottom: "6px" }}>Autopilot</div>
-                <span className={`badge ${autopilotBadge}`} style={{ fontSize: "12px", padding: "6px 12px" }}>
+                <div style={{ color: "var(--muted)", fontSize: "14px", marginBottom: "6px" }}>Autopilot</div>
+                <span className={`badge ${autopilotBadge}`} style={{ fontSize: "15px", padding: "6px 12px" }}>
                   {autopilotText}
                 </span>
               </div>
 
               <div style={{ background: "var(--surface-soft)", padding: "14px", borderRadius: "10px", border: "1px solid var(--border)" }}>
-                <div style={{ color: "var(--muted)", fontSize: "11px", marginBottom: "6px" }}>Kill switch</div>
-                <span className={`badge ${killSwitchBadge}`} style={{ fontSize: "12px", padding: "6px 12px" }}>
+                <div style={{ color: "var(--muted)", fontSize: "14px", marginBottom: "6px" }}>Kill switch</div>
+                <span className={`badge ${killSwitchBadge}`} style={{ fontSize: "15px", padding: "6px 12px" }}>
                   {killSwitchText}
                 </span>
               </div>
 
               <div style={{ background: "var(--surface-soft)", padding: "14px", borderRadius: "10px", border: "1px solid var(--border)" }}>
-                <div style={{ color: "var(--muted)", fontSize: "11px", marginBottom: "6px" }}>أقصى زيادة للميزانية</div>
-                <strong className="ltr-val" style={{ fontSize: "16px", color: "var(--foreground)", display: "block" }}>
+                <div style={{ color: "var(--muted)", fontSize: "14px", marginBottom: "6px" }}>أقصى زيادة للميزانية</div>
+                <strong className="ltr-val" style={{ fontSize: "20px", color: "var(--foreground)", display: "block" }}>
                   {r.max_budget_change_percent !== null && r.max_budget_change_percent !== undefined ? `${String(r.max_budget_change_percent)}%` : "لم يتم ضبطه بعد"}
                 </strong>
               </div>
 
               <div style={{ background: "var(--surface-soft)", padding: "14px", borderRadius: "10px", border: "1px solid var(--border)" }}>
-                <div style={{ color: "var(--muted)", fontSize: "11px", marginBottom: "6px" }}>الحد اليومي للزيادة</div>
-                <strong className="ltr-val" style={{ fontSize: "16px", color: "var(--foreground)", display: "block" }}>
+                <div style={{ color: "var(--muted)", fontSize: "14px", marginBottom: "6px" }}>الحد اليومي للزيادة</div>
+                <strong className="ltr-val" style={{ fontSize: "20px", color: "var(--foreground)", display: "block" }}>
                   {r.daily_total_increase_percent !== null && r.daily_total_increase_percent !== undefined ? `${String(r.daily_total_increase_percent)}%` : "لم يتم ضبطه بعد"}
                 </strong>
               </div>
 
               <div style={{ background: "var(--surface-soft)", padding: "14px", borderRadius: "10px", border: "1px solid var(--border)" }}>
-                <div style={{ color: "var(--muted)", fontSize: "11px", marginBottom: "6px" }}>الحد الأدنى لعمر الإعلان</div>
-                <span style={{ fontSize: "13px", fontWeight: "600", color: "var(--muted)", display: "block" }}>غير محدد</span>
+                <div style={{ color: "var(--muted)", fontSize: "14px", marginBottom: "6px" }}>الحد الأدنى لعمر الإعلان</div>
+                <span style={{ fontSize: "16.5px", fontWeight: "600", color: "var(--muted)", display: "block" }}>غير محدد</span>
               </div>
 
               <div style={{ background: "var(--surface-soft)", padding: "14px", borderRadius: "10px", border: "1px solid var(--border)" }}>
-                <div style={{ color: "var(--muted)", fontSize: "11px", marginBottom: "6px" }}>عتبة CPA الضعيف</div>
-                <strong style={{ fontSize: "15px", color: "var(--foreground)", display: "block" }}>
+                <div style={{ color: "var(--muted)", fontSize: "14px", marginBottom: "6px" }}>عتبة CPA الضعيف</div>
+                <strong style={{ fontSize: "19px", color: "var(--foreground)", display: "block" }}>
                   {r.poor_cost_multiple !== null && r.poor_cost_multiple !== undefined ? (
                     <>
                       <span className="ltr-val" style={{ fontFamily: "inherit" }}>{String(r.poor_cost_multiple)}</span>× المعيار
@@ -1464,8 +1464,8 @@ export function SafetyPage({ rows }: { rows: RecordRow[] }) {
               </div>
 
               <div style={{ background: "var(--surface-soft)", padding: "14px", borderRadius: "10px", border: "1px solid var(--border)" }}>
-                <div style={{ color: "var(--muted)", fontSize: "11px", marginBottom: "6px" }}>عتبة إنفاق بلا نتائج</div>
-                <strong style={{ fontSize: "15px", color: "var(--foreground)", display: "block" }}>
+                <div style={{ color: "var(--muted)", fontSize: "14px", marginBottom: "6px" }}>عتبة إنفاق بلا نتائج</div>
+                <strong style={{ fontSize: "19px", color: "var(--foreground)", display: "block" }}>
                   {r.no_result_pause_multiple !== null && r.no_result_pause_multiple !== undefined ? (
                     <>
                       <span className="ltr-val" style={{ fontFamily: "inherit" }}>{String(r.no_result_pause_multiple)}</span>× المعيار
