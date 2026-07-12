@@ -441,6 +441,25 @@ type Run = {
 const SYNC_TIMEOUT_MS = 20 * 60 * 1000;
 const POLL_INTERVAL_MS = 5000;
 
+function formatBackendDateRange(since: string | undefined, until: string | undefined) {
+  if (!since || !until) return "";
+  
+  const formatDate = (dateStr: string) => {
+    const date = new Date(dateStr);
+    return date.toLocaleDateString("en-GB", {
+      day: "numeric",
+      month: "short",
+      year: "numeric"
+    });
+  };
+
+  try {
+    return `${formatDate(since)} – ${formatDate(until)}`;
+  } catch (e) {
+    return "";
+  }
+}
+
 export function DashboardClient({ initial }: { initial: Data }) {
   const [days, setDays] = useState(30);
   const [data, setData] = useState(initial);
@@ -587,6 +606,44 @@ export function DashboardClient({ initial }: { initial: Data }) {
 
       {notice && <div className="sync-notice">{notice}</div>}
 
+      {data.isFallback && (
+        <div style={{
+          background: "rgba(245, 158, 11, 0.1)",
+          border: "1px solid rgb(245, 158, 11)",
+          borderRadius: "8px",
+          padding: "12px 16px",
+          marginBottom: "16px",
+          color: "rgb(217, 119, 6)",
+          fontSize: "13px",
+          fontWeight: "500",
+          display: "flex",
+          alignItems: "center",
+          gap: "8px"
+        }}>
+          <span>⚠️</span>
+          <span>عرض بيانات احتياطية من قاعدة البيانات المحلية (تعذر تحديث البيانات مباشرة من Meta API).</span>
+        </div>
+      )}
+
+      {data.isPartial && (
+        <div style={{
+          background: "rgba(239, 68, 68, 0.1)",
+          border: "1px solid rgb(239, 68, 68)",
+          borderRadius: "8px",
+          padding: "12px 16px",
+          marginBottom: "16px",
+          color: "rgb(220, 38, 38)",
+          fontSize: "13px",
+          fontWeight: "500",
+          display: "flex",
+          alignItems: "center",
+          gap: "8px"
+        }}>
+          <span>⚠️</span>
+          <span>فشل الاتصال ببعض الحسابات الإعلانية على Meta API. يتم عرض بيانات جزئية للحسابات الناجحة فقط.</span>
+        </div>
+      )}
+
       <section className="metrics-grid">
         {[
           ["الإنفاق", money(s.spend)],
@@ -602,20 +659,27 @@ export function DashboardClient({ initial }: { initial: Data }) {
       </section>
 
       <article className="panel">
-        <div className="period-switch">
-          {[7, 14, 30].map((d) => (
-            <button
-              disabled={syncing || loadingDays}
-              key={d}
-              className={d === days ? "active" : ""}
-              onClick={async () => {
-                setDays(d);
-                await load(d);
-              }}
-            >
-              {d} يومًا
-            </button>
-          ))}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", flexWrap: "wrap", gap: "10px" }}>
+          <div className="period-switch">
+            {[7, 14, 30].map((d) => (
+              <button
+                disabled={syncing || loadingDays}
+                key={d}
+                className={d === days ? "active" : ""}
+                onClick={async () => {
+                  setDays(d);
+                  await load(d);
+                }}
+              >
+                {d} يومًا
+              </button>
+            ))}
+          </div>
+          {data.range && (
+            <span style={{ fontSize: "12px", color: "var(--muted)", fontWeight: "500" }} className="ltr-val">
+              {formatBackendDateRange(data.range.since, data.range.until)}
+            </span>
+          )}
         </div>
         <Chart points={data.chart} loading={loadingDays} />
       </article>
