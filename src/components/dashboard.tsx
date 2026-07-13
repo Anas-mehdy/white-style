@@ -477,7 +477,7 @@ export function DashboardClient({ initial }: { initial: Data }) {
     };
   }, []);
 
-  async function load(d = days) {
+  async function load(d = days, refresh = false) {
     if (daysController.current) {
       daysController.current.abort();
     }
@@ -485,7 +485,7 @@ export function DashboardClient({ initial }: { initial: Data }) {
     daysController.current = c;
     setLoadingDays(true);
     try {
-      const r = await fetch(`/api/dashboard?days=${d}`, {
+      const r = await fetch(`/api/dashboard?days=${d}${refresh ? "&refresh=true" : ""}`, {
         cache: "no-store",
         signal: c.signal,
       });
@@ -540,7 +540,7 @@ export function DashboardClient({ initial }: { initial: Data }) {
         continue;
       }
       if (run.status === "succeeded") {
-        await load();
+        await load(days, true);
         setNotice(
           `تم تحديث البيانات بنجاح — ${run.records_processed} سجلًا، انتهت ${new Date(
             run.finished_at!
@@ -597,7 +597,14 @@ export function DashboardClient({ initial }: { initial: Data }) {
   return (
     <>
       <header className="topbar">
-        <h1>نظرة عامة</h1>
+        <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+          <h1>نظرة عامة</h1>
+          {data.syncStatus && (
+            <p style={{ margin: 0, color: "var(--muted)", fontSize: "12.5px", fontWeight: "normal" }}>
+              {data.syncStatus.status === "fresh" ? data.syncStatus.message : "يتم عرض البيانات المحفوظة محليًا"}
+            </p>
+          )}
+        </div>
         <button disabled={syncing} className="sync-button" onClick={sync}>
           <RefreshCw size={16} />
           {syncing ? "جارٍ مزامنة البيانات..." : "تحديث البيانات"}
@@ -606,14 +613,14 @@ export function DashboardClient({ initial }: { initial: Data }) {
 
       {notice && <div className="sync-notice">{notice}</div>}
 
-      {data.isFallback && (
+      {data.syncStatus && data.syncStatus.status !== "fresh" && (
         <div style={{
-          background: "rgba(245, 158, 11, 0.1)",
-          border: "1px solid rgb(245, 158, 11)",
+          background: data.syncStatus.status === "failed" ? "rgba(239, 68, 68, 0.1)" : "rgba(245, 158, 11, 0.1)",
+          border: data.syncStatus.status === "failed" ? "1px solid rgb(239, 68, 68)" : "1px solid rgb(245, 158, 11)",
           borderRadius: "8px",
           padding: "12px 16px",
           marginBottom: "16px",
-          color: "rgb(217, 119, 6)",
+          color: data.syncStatus.status === "failed" ? "rgb(220, 38, 38)" : "rgb(217, 119, 6)",
           fontSize: "13px",
           fontWeight: "500",
           display: "flex",
@@ -621,26 +628,7 @@ export function DashboardClient({ initial }: { initial: Data }) {
           gap: "8px"
         }}>
           <span>⚠️</span>
-          <span>عرض بيانات احتياطية من قاعدة البيانات المحلية (تعذر تحديث البيانات مباشرة من Meta API).</span>
-        </div>
-      )}
-
-      {data.isPartial && (
-        <div style={{
-          background: "rgba(239, 68, 68, 0.1)",
-          border: "1px solid rgb(239, 68, 68)",
-          borderRadius: "8px",
-          padding: "12px 16px",
-          marginBottom: "16px",
-          color: "rgb(220, 38, 38)",
-          fontSize: "13px",
-          fontWeight: "500",
-          display: "flex",
-          alignItems: "center",
-          gap: "8px"
-        }}>
-          <span>⚠️</span>
-          <span>فشل الاتصال ببعض الحسابات الإعلانية على Meta API. يتم عرض بيانات جزئية للحسابات الناجحة فقط.</span>
+          <span>{data.syncStatus.message}</span>
         </div>
       )}
 

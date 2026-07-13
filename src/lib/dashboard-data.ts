@@ -23,7 +23,7 @@ export type ChartPoint = {
 
 type CacheEntry = {
   timestamp: number;
-  data: any;
+  data: unknown;
 };
 
 const memoryCache = new Map<string, CacheEntry>();
@@ -34,16 +34,22 @@ const getCacheKey = (days: number, since: string, until: string, accountIds: str
 };
 
 const getSystemDateRange = (daysCount: number) => {
-  const untilDate = new Date();
-  // Align date using the timezone offset of the local system (which is July 12, 2026)
-  const offset = untilDate.getTimezoneOffset();
-  const localDate = new Date(untilDate.getTime() - (offset * 60 * 1000));
-  const until = localDate.toISOString().split("T")[0];
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Hebron",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  });
   
+  // Get Hebron local today date string
+  const todayStr = formatter.format(new Date()); // YYYY-MM-DD
+  const until = todayStr;
+
+  // Subtract (daysCount - 1) days to get start date in Hebron local timezone
+  const untilDate = new Date(`${until}T12:00:00`);
   const sinceDate = new Date(untilDate.getTime() - (daysCount - 1) * 24 * 60 * 60 * 1000);
-  const sinceLocal = new Date(sinceDate.getTime() - (offset * 60 * 1000));
-  const since = sinceLocal.toISOString().split("T")[0];
-  
+  const since = formatter.format(sinceDate); // YYYY-MM-DD
+
   return { since, until };
 };
 
@@ -61,68 +67,15 @@ const generateDateRange = (since: string, until: string): string[] => {
   return dates;
 };
 
-const getMessagingConversations = (actions: any[] | undefined): number => {
-  if (!actions || !Array.isArray(actions)) return 0;
-  
-  const priority = [
-    "onsite_conversion.messaging_conversation_started_7d",
-    "messaging_conversation_started_7d",
-    "onsite_conversion.total_messaging_connection"
-  ];
-  
-  for (const type of priority) {
-    const action = actions.find((a) => a.action_type === type);
-    if (action) {
-      return Math.trunc(Number(action.value ?? 0));
-    }
-  }
-  
-  return 0;
-};
-
-const fetchMetaInsightsForAccount = async (
-  metaAccountId: string,
-  since: string,
-  until: string,
-  token: string,
-  version: string
-): Promise<any[]> => {
-  const rows: any[] = [];
-  let nextPageUrl = `https://graph.facebook.com/${version}/${metaAccountId}/insights?level=account&time_increment=1&fields=spend,actions,date_start,date_stop&time_range=${encodeURIComponent(JSON.stringify({ since, until }))}&access_token=${token}`;
-
-  let pageCount = 0;
-  const maxPages = 50;
-
-  while (nextPageUrl && pageCount < maxPages) {
-    const res = await fetch(nextPageUrl, { cache: "no-store" });
-    if (!res.ok) {
-      const errorBody = await res.text();
-      const sanitizedError = errorBody.replace(token, "[REDACTED]");
-      throw new Error(`Meta API Error (${res.status}): ${sanitizedError}`);
-    }
-    const data = await res.json();
-    if (data.error) {
-      const sanitizedError = JSON.stringify(data.error).replace(token, "[REDACTED]");
-      throw new Error(`Meta API Error: ${sanitizedError}`);
-    }
-    if (Array.isArray(data.data)) {
-      rows.push(...data.data);
-    }
-    nextPageUrl = data.paging?.next || null;
-    pageCount++;
-  }
-  return rows;
-};
-
-export async function getDashboardData(days = 30) {
+export async function getDashboardData(days = 30, bypassCache = false) {
   const supabase = await createClient();
   const { since, until } = getSystemDateRange(days);
 
-  // Fetch accounts and metadata first
+  // Fetch accounts, decisions, sync runs, notifications, config in parallel from Supabase
   const [accountsResult, decisionsResult, runsResult, notificationsResult, configResult] = await Promise.all([
     supabase.from("meta_ad_accounts").select("id,name,meta_account_id,currency,timezone_name,connection_status,last_synced_at").order("name"),
     supabase.from("agent_decisions_final_status").select("id").gte("created_at", since),
-    supabase.from("sync_runs").select("status,finished_at,started_at").order("started_at", { ascending: false }).limit(1),
+    supabase.from("sync_runs").select("status,started_at,finished_at,error_summary,cursor_state").eq("source", "meta_api").order("started_at", { ascending: false }),
     supabase.from("notifications").select("id", { count: "exact", head: true }).is("read_at", null),
     supabase.from("agent_configs").select("mode,kill_switch").order("updated_at", { ascending: false }).limit(1),
   ]);
@@ -130,96 +83,26 @@ export async function getDashboardData(days = 30) {
   const error = [accountsResult, decisionsResult, runsResult, notificationsResult, configResult].find((r) => r.error)?.error;
   if (error) throw new Error(error.message);
 
-  const connectedAccounts = (accountsResult.data ?? []).filter(
-    (a) => a.connection_status === "connected"
-  );
+  const allAccounts = accountsResult.data ?? [];
+  const connectedAccounts = allAccounts.filter((a) => a.connection_status === "connected");
   const connectedIds = connectedAccounts.map((a) => a.id);
 
-  // Check Memory Cache
+  // Check Memory Cache unless bypassed
   const cacheKey = getCacheKey(days, since, until, connectedIds);
-  const cached = memoryCache.get(cacheKey);
-  if (cached && Date.now() - cached.timestamp < 60000) {
-    console.info("[dashboard-data] Returning cached dashboard data");
-    return cached.data;
-  }
-
-  const token = process.env.META_ACCESS_TOKEN;
-  const version = process.env.META_GRAPH_API_VERSION || "v25.0";
-  const isTokenValid = token && token.trim() !== "" && token !== "PASTE_NEW_TOKEN_MANUALLY";
-
-  let dataSource: "meta_api" | "database" = "meta_api";
-  let isFallback = false;
-  let isPartial = false;
-  const perAccountStatus: Record<string, { status: "success" | "error"; error?: string }> = {};
-
-  const allMetaRows: any[] = [];
-  const accountTotals = new Map<string, { spend: number; conversations: number }>();
-
-  if (!isTokenValid) {
-    dataSource = "database";
-    isFallback = true;
-    console.info("[dashboard-data] No valid Meta access token. Falling back to database insights.");
-  } else {
-    for (const account of connectedAccounts) {
-      try {
-        console.info(`[dashboard-data] Fetching Meta insights for account ${account.name} (${account.meta_account_id})...`);
-        const rows = await fetchMetaInsightsForAccount(
-          account.meta_account_id,
-          since,
-          until,
-          token,
-          version
-        );
-
-        let accountSpendSum = 0;
-        let accountConversationsSum = 0;
-
-        for (const row of rows) {
-          accountSpendSum += Number(row.spend ?? 0);
-          accountConversationsSum += getMessagingConversations(row.actions);
-        }
-
-        console.info("[Meta Fetch Success]", {
-          accountId: account.id,
-          metaAccountId: account.meta_account_id,
-          requestedRange: { since, until },
-          rowsReturned: rows.length,
-          firstDate: rows[0]?.date_start ?? "N/A",
-          lastDate: rows[rows.length - 1]?.date_stop ?? "N/A",
-          accountSpendTotal: accountSpendSum,
-          accountConversationsTotal: accountConversationsSum
-        });
-
-        allMetaRows.push(...rows.map((r) => ({ ...r, ad_account_id: account.id })));
-        accountTotals.set(account.id, { spend: accountSpendSum, conversations: accountConversationsSum });
-        perAccountStatus[account.id] = { status: "success" };
-      } catch (err: any) {
-        console.error(`[dashboard-data] Failed to fetch Meta insights for account ${account.name}:`, err.message);
-        perAccountStatus[account.id] = { status: "error", error: err.message };
-        isPartial = true;
-      }
-    }
-
-    const succeededCount = Object.values(perAccountStatus).filter(
-      (s) => s.status === "success"
-    ).length;
-
-    if (succeededCount === 0) {
-      dataSource = "database";
-      isFallback = true;
-      isPartial = false;
-      console.warn("[dashboard-data] All Meta API fetches failed. Falling back to database insights.");
-    } else if (succeededCount < connectedAccounts.length) {
-      isPartial = true;
+  if (!bypassCache) {
+    const cached = memoryCache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < 30000) {
+      console.info("[dashboard-data] Returning cached dashboard data");
+      return cached.data;
     }
   }
 
-  if (isFallback) {
-    allMetaRows.length = 0;
-    accountTotals.clear();
-    console.info(`[dashboard-data] Querying database insights for range: ${since} to ${until}`);
-
-    let dbRows: any[] = [];
+  // Fetch daily insights using paginated range queries to prevent row truncation
+  console.info(`[dashboard-data] Querying database insights for range: ${since} to ${until} for connected accounts only.`);
+  
+  const dbRows: Record<string, unknown>[] = [];
+  
+  if (connectedIds.length > 0) {
     let dbPage = 0;
     const dbPageSize = 1000;
     let hasMoreDb = true;
@@ -230,6 +113,7 @@ export async function getDashboardData(days = 30) {
       const { data: pageData, error: dbError } = await supabase
         .from("ad_insights_daily")
         .select("ad_account_id,insight_date,spend,messaging_conversations")
+        .in("ad_account_id", connectedIds)
         .gte("insight_date", since)
         .lte("insight_date", until)
         .range(rangeStart, rangeEnd);
@@ -248,26 +132,14 @@ export async function getDashboardData(days = 30) {
         }
       }
     }
+  }
 
-    console.info(`[dashboard-data] Database returned ${dbRows.length} rows total.`);
+  console.info(`[dashboard-data] Database returned ${dbRows.length} rows total.`);
 
-    for (const row of dbRows) {
-      const date = row.insight_date;
-      const spend = Number(row.spend ?? 0);
-      const conversations = Math.trunc(Number(row.messaging_conversations ?? 0));
-
-      const accTotal = accountTotals.get(row.ad_account_id) ?? { spend: 0, conversations: 0 };
-      accTotal.spend += spend;
-      accTotal.conversations += conversations;
-      accountTotals.set(row.ad_account_id, accTotal);
-
-      allMetaRows.push({
-        ad_account_id: row.ad_account_id,
-        date_start: date,
-        spend,
-        actions: [{ action_type: "messaging_conversation_started_7d", value: conversations }]
-      });
-    }
+  // Initialize totals map per account
+  const accountTotals = new Map<string, { spend: number; conversations: number }>();
+  for (const account of allAccounts) {
+    accountTotals.set(account.id, { spend: 0, conversations: 0 });
   }
 
   const calendarDates = generateDateRange(since, until);
@@ -276,13 +148,19 @@ export async function getDashboardData(days = 30) {
     dailyMap.set(date, { spend: 0, conversations: 0 });
   }
 
-  for (const row of allMetaRows) {
-    const date = row.date_start;
+  // Aggregate insights
+  for (const row of dbRows) {
+    const date = row.insight_date;
     const spend = Number(row.spend ?? 0);
-    const conversations = dataSource === "meta_api"
-      ? getMessagingConversations(row.actions)
-      : Math.trunc(Number(row.actions?.[0]?.value ?? 0));
+    const conversations = Math.trunc(Number(row.messaging_conversations ?? 0));
 
+    // Update account totals
+    const accTotal = accountTotals.get(row.ad_account_id) ?? { spend: 0, conversations: 0 };
+    accTotal.spend += spend;
+    accTotal.conversations += conversations;
+    accountTotals.set(row.ad_account_id, accTotal);
+
+    // Update daily map
     if (dailyMap.has(date)) {
       const current = dailyMap.get(date)!;
       current.spend += spend;
@@ -290,6 +168,7 @@ export async function getDashboardData(days = 30) {
     }
   }
 
+  // Generate chart data
   const daily: ChartPoint[] = calendarDates.map((date) => {
     const val = dailyMap.get(date)!;
     return {
@@ -300,20 +179,84 @@ export async function getDashboardData(days = 30) {
     };
   });
 
-  const spend = daily.reduce((sum, d) => sum + d.spend, 0);
-  const conversations = daily.reduce((sum, d) => sum + d.conversations, 0);
-  const cost = conversations ? spend / conversations : null;
+  const totalSpend = daily.reduce((sum, d) => sum + d.spend, 0);
+  const totalConversations = daily.reduce((sum, d) => sum + d.conversations, 0);
+  const costPerConversation = totalConversations ? totalSpend / totalConversations : null;
 
-  console.info("[Meta Aggregation Complete]", {
-    range: { since, until, days },
-    dataSource,
-    isFallback,
-    isPartial,
-    combinedSpendTotal: spend,
-    combinedConversationsTotal: conversations
-  });
+  // Determine sync status safely from stored database sync runs
+  const totalConnected = connectedAccounts.length;
+  let syncStatus: "fresh" | "stale" | "partial" | "failed" | "never_synced" = "never_synced";
+  let lastSyncedAt: string | null = null;
+  let successfulAccounts = 0;
+  let failedAccounts = 0;
+  let syncMessage = "";
 
-  const accounts: AccountRow[] = (accountsResult.data ?? []).map((a) => {
+  const latestFinishedRun = (runsResult.data ?? []).find(r => 
+    ["succeeded", "failed", "partial"].includes(r.status)
+  );
+
+  if (totalConnected === 0) {
+    syncStatus = "never_synced";
+    syncMessage = "لم تتم مزامنة بيانات الحسابات بعد";
+  } else {
+    // Determine lastSyncedAt based on connected accounts last_synced_at timestamps
+    const syncDates = connectedAccounts
+      .map(a => a.last_synced_at ? new Date(a.last_synced_at).getTime() : 0)
+      .filter(t => t > 0);
+    
+    const latestAccountSync = syncDates.length > 0 ? Math.max(...syncDates) : 0;
+
+    if (latestAccountSync > 0) {
+      lastSyncedAt = new Date(latestAccountSync).toISOString();
+      const ageHours = (Date.now() - latestAccountSync) / (3600 * 1000);
+
+      if (ageHours > 2) {
+        syncStatus = "stale";
+        syncMessage = "البيانات لم تُحدّث منذ أكثر من ساعتين";
+      } else {
+        // Look at the latest finished sync run to check for partial failures
+        if (latestFinishedRun && latestFinishedRun.status === "partial") {
+          syncStatus = "partial";
+          
+          // Count based on the last run cursor state or default to safe estimation
+          const cursor = latestFinishedRun.cursor_state as Record<string, unknown> | null;
+          if (cursor && typeof cursor === "object" && typeof cursor.succeeded_accounts === "number") {
+            successfulAccounts = cursor.succeeded_accounts;
+            failedAccounts = Math.max(0, totalConnected - successfulAccounts);
+          } else {
+            successfulAccounts = connectedAccounts.filter(a => a.last_synced_at && (Date.now() - new Date(a.last_synced_at).getTime()) < 2 * 3600 * 1000).length;
+            failedAccounts = Math.max(0, totalConnected - successfulAccounts);
+          }
+          syncMessage = `تم تحديث ${successfulAccounts} حسابات من أصل ${totalConnected} — تعذر تحديث ${failedAccounts} حسابات`;
+        } else if (latestFinishedRun && latestFinishedRun.status === "failed") {
+          syncStatus = "failed";
+          syncMessage = "تعذر تحديث الحسابات — يتم عرض آخر بيانات محفوظة";
+        } else {
+          syncStatus = "fresh";
+          const minutes = Math.floor((Date.now() - latestAccountSync) / 60000);
+          if (minutes <= 1) {
+            syncMessage = "آخر تحديث: منذ أقل من دقيقة";
+          } else if (minutes === 2) {
+            syncMessage = "آخر تحديث: منذ دقيقتين";
+          } else if (minutes >= 3 && minutes <= 10) {
+            syncMessage = `آخر تحديث: منذ ${minutes} دقائق`;
+          } else {
+            syncMessage = `آخر تحديث: منذ ${minutes} دقيقة`;
+          }
+        }
+      }
+    } else {
+      if (latestFinishedRun && latestFinishedRun.status === "failed") {
+        syncStatus = "failed";
+        syncMessage = "تعذر تحديث الحسابات — يتم عرض آخر بيانات محفوظة";
+      } else {
+        syncStatus = "never_synced";
+        syncMessage = "لم تتم مزامنة بيانات الحسابات بعد";
+      }
+    }
+  }
+
+  const accounts: AccountRow[] = allAccounts.map((a) => {
     const accTotal = accountTotals.get(a.id) ?? { spend: 0, conversations: 0 };
     return {
       ...a,
@@ -323,13 +266,14 @@ export async function getDashboardData(days = 30) {
   });
 
   const debugCounts = {
-    accountsCount: accountsResult.data?.length ?? 0,
-    insightsCount: allMetaRows.length,
+    accountsCount: allAccounts.length,
+    insightsCount: dbRows.length,
     syncRunsCount: runsResult.data?.length ?? 0,
     decisionsCount: decisionsResult.data?.length ?? 0,
     notificationsCount: notificationsResult.count ?? 0,
     configsCount: configResult.data?.length ?? 0
   };
+
   const debugErrors = {
     meta_ad_accounts: accountsResult.error ? { code: accountsResult.error.code, message: accountsResult.error.message } : null,
     sync_runs: runsResult.error ? { code: runsResult.error.code, message: runsResult.error.message } : null,
@@ -342,22 +286,31 @@ export async function getDashboardData(days = 30) {
     accounts,
     chart: daily,
     stats: {
-      spend,
-      conversations,
-      cost,
-      monitoredSpend: spend,
-      connected: accounts.filter((a) => a.connection_status === "connected").length,
+      spend: totalSpend,
+      conversations: totalConversations,
+      cost: costPerConversation,
+      monitoredSpend: totalSpend,
+      connected: totalConnected,
       decisions: decisionsResult.data?.length ?? 0,
       alerts: notificationsResult.count ?? 0,
       lastSync: runsResult.data?.[0] ?? null,
       config: configResult.data?.[0] ?? null
     },
+    syncStatus: {
+      status: syncStatus,
+      lastSyncedAt,
+      connectedAccounts: totalConnected,
+      successfulAccounts,
+      failedAccounts,
+      message: syncMessage,
+      limitations: "تعتمد دقة حالة المزامنة على أحدث سجلات المزامنة العامة وتواريخ آخر تحديث للحسابات النشطة المسجلة في جدول sync_runs لضمان الموثوقية."
+    },
     range: { since, until, days },
     daily,
-    dataSource,
-    isFallback,
-    isPartial,
-    perAccountStatus,
+    dataSource: "database" as const,
+    isFallback: false,
+    isPartial: false,
+    perAccountStatus: {},
     debugCounts,
     debugErrors
   };
