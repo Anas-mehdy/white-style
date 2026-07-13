@@ -121,7 +121,7 @@ export async function getDashboardData(days = 30) {
   // Fetch accounts and metadata first
   const [accountsResult, decisionsResult, runsResult, notificationsResult, configResult] = await Promise.all([
     supabase.from("meta_ad_accounts").select("id,name,meta_account_id,currency,timezone_name,connection_status,last_synced_at").order("name"),
-    supabase.from("agent_decisions").select("id").gte("created_at", since),
+    supabase.from("agent_decisions_final_status").select("id").gte("created_at", since),
     supabase.from("sync_runs").select("status,finished_at,started_at").order("started_at", { ascending: false }).limit(1),
     supabase.from("notifications").select("id", { count: "exact", head: true }).is("read_at", null),
     supabase.from("agent_configs").select("mode,kill_switch").order("updated_at", { ascending: false }).limit(1),
@@ -371,7 +371,7 @@ export async function getPageData() {
   const supabase = await createClient();
   const [accounts, decisions, actions, runs, configs] = await Promise.all([
     getDashboardData(30),
-    supabase.from("agent_decisions").select("id,decision,reason,confidence,created_at,ad_account_id,meta_ad_accounts(name,currency),meta_ads(name),meta_ad_sets(name,daily_budget),meta_campaigns(name,daily_budget),proposed_change,input_snapshot,agent_actions(id,status,executed_at,error_message,verified_state,created_at,before_state,requested_state,meta_entity_type,meta_entity_id,idempotency_key,error_code)").order("created_at", { ascending: false }),
+    supabase.from("agent_decisions_final_status").select("id,decision,reason,confidence,created_at,ad_account_id,proposed_change,input_snapshot,final_execution_status,final_status_at,latest_status,latest_error_code,latest_error_message,verified_action_at,failed_action_at,skipped_action_at,in_progress_action_at,ad_account_name,currency,meta_account_id,campaign_name,meta_campaign_id,ad_set_name,ad_set_daily_budget,meta_adset_id,ad_name,meta_ad_id").order("created_at", { ascending: false }),
     supabase.from("agent_actions").select("id,status,action_type,meta_entity_type,meta_entity_id,executed_at,created_at,error_message,before_state,requested_state,verified_state,idempotency_key,error_code,agent_decisions(id,decision,reason,confidence,created_at,meta_campaigns(name),meta_ad_sets(name),meta_ads(name),meta_ad_accounts(name,currency))").order("created_at", { ascending: false }),
     supabase.from("sync_runs").select("id,source,status,started_at,finished_at,records_processed,error_summary,cursor_state,meta_ad_accounts(name)").order("started_at", { ascending: false }),
     supabase.from("agent_configs").select("id,mode,kill_switch,max_budget_change_percent,daily_total_increase_percent,cooldown_hours,stale_data_minutes,no_result_pause_multiple,poor_cost_multiple,scale_cost_multiple,minimum_results_to_scale,meta_ad_accounts(name)").order("updated_at", { ascending: false }),

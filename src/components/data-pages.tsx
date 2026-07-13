@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { PageHeader, Table } from "@/components/dashboard";
 import { useRouter } from "next/navigation";
 import { 
@@ -38,6 +38,9 @@ import {
 type RecordRow = Record<string, unknown>;
 
 function name(row: RecordRow) {
+  if (row.ad_account_name !== undefined) {
+    return String(row.ad_account_name || "—");
+  }
   const account = row.meta_ad_accounts as { name?: string } | null;
   return account?.name ?? "—";
 }
@@ -54,6 +57,9 @@ function getLatestAction(decision: RecordRow): RecordRow | null {
 
 // Helper to get decision status
 function getDecisionStatus(decision: RecordRow): string {
+  if (decision.final_execution_status !== undefined) {
+    return String(decision.final_execution_status || "pending");
+  }
   const latestAction = getLatestAction(decision);
   if (!latestAction) return "pending";
   return String(latestAction.status || "pending");
@@ -61,6 +67,18 @@ function getDecisionStatus(decision: RecordRow): string {
 
 // Target info helper for decisions
 function getTargetInfo(r: RecordRow) {
+  if (r.ad_name !== undefined || r.ad_set_name !== undefined || r.campaign_name !== undefined) {
+    if (r.ad_name) {
+      return { name: String(r.ad_name), label: "إعلان", id: String(r.meta_ad_id || "—") };
+    }
+    if (r.ad_set_name) {
+      return { name: String(r.ad_set_name), label: "مجموعة إعلانية", id: String(r.meta_adset_id || "—") };
+    }
+    if (r.campaign_name) {
+      return { name: String(r.campaign_name), label: "حملة", id: String(r.meta_campaign_id || "—") };
+    }
+    return { name: "غير محدد", label: "—", id: "—" };
+  }
   if (r.meta_ads && (r.meta_ads as any).name) {
     return { name: (r.meta_ads as any).name, label: "إعلان", id: (r.meta_ads as any).meta_ad_id };
   }
@@ -131,18 +149,56 @@ function extractMetricsFromSnapshot(snapshot: unknown, currency: string = "USD")
   };
 }
 
-// Helper to render Status badges
-function getStatusBadge(status: string) {
+function getSkippedReasonArabic(errorCode: unknown): string {
+  const code = String(errorCode || "").trim();
+  switch (code) {
+    case "COOLDOWN_ACTIVE":
+      return "مؤجل بسبب فترة الحماية";
+    case "ALREADY_EXECUTED":
+      return "تم تنفيذ القرار مسبقًا";
+    case "SUPERSEDED_BY_NEWER_DECISION":
+      return "تم استبداله بقرار أحدث";
+    case "KILL_SWITCH_ACTIVE":
+      return "التنفيذ متوقف بواسطة مفتاح الحماية";
+    case "AUTOPILOT_DISABLED":
+      return "وضع التنفيذ التلقائي غير مفعّل";
+    case "STALE_DATA":
+      return "البيانات بحاجة إلى مزامنة";
+    default:
+      return "تم التخطي";
+  }
+}
+
+function translateActionStatus(status: string): string {
   switch (status) {
+    case "verified":
+      return "تم التنفيذ والتحقق";
+    case "failed":
+      return "فشل التنفيذ";
+    case "skipped":
+      return "تم التخطي";
+    case "executing":
+      return "جارٍ التنفيذ";
+    case "queued":
+      return "في الانتظار";
+    default:
+      return status;
+  }
+}
+
+// Helper to render Status badges
+function getStatusBadge(status: string, latestStatus?: string, errorCode?: string) {
+  if (status === "pending" && (latestStatus === "queued" || latestStatus === "executing")) {
+    return <span className="badge badge--info">قيد التنفيذ</span>;
+  }
+  switch (status) {
+    case "executed":
     case "verified":
       return <span className="badge badge--success">تم التنفيذ</span>;
     case "failed":
       return <span className="badge badge--failed">فشل التنفيذ</span>;
     case "skipped":
-      return <span className="badge badge--neutral">تم التخطي</span>;
-    case "queued":
-    case "executing":
-      return <span className="badge badge--info">قيد التنفيذ</span>;
+      return <span className="badge badge--neutral">{getSkippedReasonArabic(errorCode)}</span>;
     case "pending":
     default:
       return <span className="badge badge--pending">بانتظار التنفيذ</span>;
@@ -194,14 +250,71 @@ export function DecisionsPage({ rows }: { rows: RecordRow[] }) {
   const [confidenceFilter, setConfidenceFilter] = useState(0);
   
   // Tab State
-  const [activeTab, setActiveTab] = useState("current"); // current, executed, failed, all
+  const [activeTab, setActiveTab] = useState("current"); // current, executed, failed, skipped, all
   
   // Drawer States
   const [selectedRow, setSelectedRow] = useState<RecordRow | null>(null);
   const [isTechOpen, setIsTechOpen] = useState(false);
+  const [decisionActions, setDecisionActions] = useState<any[]>([]);
+  const [actionsLoading, setActionsLoading] = useState(false);
+  const [actionsError, setActionsError] = useState<string | null>(null);
+
+  // Minimal Custom Toast Notifications State
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // Timezone-aware local today YYYY-MM-DD
   const localToday = useMemo(() => new Date().toLocaleDateString("en-CA"), []);
+
+  // On-demand fetch historical actions when the details drawer opens
+  useEffect(() => {
+    if (!selectedRow || !selectedRow.id) {
+      setDecisionActions([]);
+      setActionsError(null);
+      return;
+    }
+
+    // Check if actions are already pre-loaded (e.g. if loaded via execution log logic)
+    if (selectedRow.agent_actions && Array.isArray(selectedRow.agent_actions) && selectedRow.agent_actions.length > 0) {
+      setDecisionActions(selectedRow.agent_actions);
+      setActionsError(null);
+      return;
+    }
+
+    const fetchActions = async () => {
+      setActionsLoading(true);
+      setActionsError(null);
+      try {
+        const res = await fetch(`/api/agent-decisions/${selectedRow.id}/actions`);
+        if (!res.ok) {
+          throw new Error("Failed to load execution attempts");
+        }
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          setDecisionActions(data);
+        } else {
+          setDecisionActions([]);
+        }
+      } catch (err) {
+        console.error("Error fetching actions:", err);
+        setActionsError(err instanceof Error ? err.message : "حدث خطأ أثناء تحميل سجل التنفيذ");
+        setDecisionActions([]);
+      } finally {
+        setActionsLoading(false);
+      }
+    };
+
+    fetchActions();
+  }, [selectedRow]);
+
+  // Copy to clipboard helper
+  const copyToClipboard = (text: string, label: string) => {
+    navigator.clipboard.writeText(text).then(() => {
+      setToastMessage(label === "معرف الحملة" ? "تم نسخ معرف الحملة" : `تم نسخ ${label}`);
+      setTimeout(() => {
+        setToastMessage(null);
+      }, 2500);
+    });
+  };
 
   // Reset Filters
   const resetFilters = () => {
@@ -218,36 +331,52 @@ export function DecisionsPage({ rows }: { rows: RecordRow[] }) {
   const accountsList = useMemo(() => {
     const map = new Map<string, string>();
     for (const r of rows) {
-      const acct = r.meta_ad_accounts as { name?: string } | null;
-      if (r.ad_account_id && acct?.name) {
-        map.set(String(r.ad_account_id), acct.name);
+      const acctName = String(r.ad_account_name || "");
+      if (r.ad_account_id && acctName) {
+        map.set(String(r.ad_account_id), acctName);
       }
     }
     return [...map.entries()].map(([id, name]) => ({ id, name }));
   }, [rows]);
 
-  // KPI counts based on TODAY (created today)
+  // KPI counts based on TODAY using actual event timestamps
   const kpiStats = useMemo(() => {
-    const todayRows = rows.filter(r => {
+    const createdToday = rows.filter(r => {
       const dateStr = new Date(String(r.created_at)).toLocaleDateString("en-CA");
       return dateStr === localToday;
-    });
+    }).length;
 
-    const createdToday = todayRows.length;
-    const executedToday = todayRows.filter(r => getDecisionStatus(r) === "verified").length;
-    const skippedToday = todayRows.filter(r => getDecisionStatus(r) === "skipped").length;
-    const failedToday = todayRows.filter(r => getDecisionStatus(r) === "failed").length;
+    const executedToday = rows.filter(r => {
+      if (r.final_execution_status !== "executed" || !r.verified_action_at) return false;
+      const dateStr = new Date(String(r.verified_action_at)).toLocaleDateString("en-CA");
+      return dateStr === localToday;
+    }).length;
+
+    const skippedToday = rows.filter(r => {
+      if (r.final_execution_status !== "skipped" || !r.skipped_action_at) return false;
+      const dateStr = new Date(String(r.skipped_action_at)).toLocaleDateString("en-CA");
+      return dateStr === localToday;
+    }).length;
+
+    const failedToday = rows.filter(r => {
+      if (r.final_execution_status !== "failed" || !r.failed_action_at) return false;
+      const dateStr = new Date(String(r.failed_action_at)).toLocaleDateString("en-CA");
+      return dateStr === localToday;
+    }).length;
 
     // Changes breakdown today
     let budgetDecreased = 0;
     let budgetIncreased = 0;
     let paused = 0;
     
-    todayRows.forEach(r => {
-      if (getDecisionStatus(r) === "verified") {
-        if (r.decision === "decrease_budget") budgetDecreased++;
-        else if (r.decision === "increase_budget") budgetIncreased++;
-        else if (r.decision === "pause") paused++;
+    rows.forEach(r => {
+      if (r.final_execution_status === "executed" && r.verified_action_at) {
+        const dateStr = new Date(String(r.verified_action_at)).toLocaleDateString("en-CA");
+        if (dateStr === localToday) {
+          if (r.decision === "decrease_budget") budgetDecreased++;
+          else if (r.decision === "increase_budget") budgetIncreased++;
+          else if (r.decision === "pause") paused++;
+        }
       }
     });
 
@@ -317,14 +446,16 @@ export function DecisionsPage({ rows }: { rows: RecordRow[] }) {
         }
       }
 
-      // Tab filtering
+      // Tab filtering based strictly on final_execution_status
       const stat = getDecisionStatus(r);
       if (activeTab === "current") {
-        return stat === "pending" || stat === "queued" || stat === "executing";
+        return stat === "pending";
       } else if (activeTab === "executed") {
-        return stat === "verified";
+        return stat === "executed";
       } else if (activeTab === "failed") {
         return stat === "failed";
+      } else if (activeTab === "skipped") {
+        return stat === "skipped";
       }
       
       return true; // all tab
@@ -336,6 +467,34 @@ export function DecisionsPage({ rows }: { rows: RecordRow[] }) {
 
   return (
     <>
+      {/* Premium Minimal Success Toast Notification */}
+      {toastMessage && (
+        <div style={{
+          position: "fixed",
+          bottom: "24px",
+          right: "24px",
+          background: "rgba(15, 23, 42, 0.95)",
+          backdropFilter: "blur(8px)",
+          color: "#ffffff",
+          border: "1px solid rgba(255, 255, 255, 0.1)",
+          padding: "12px 20px",
+          borderRadius: "8px",
+          boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.3), 0 8px 10px -6px rgba(0, 0, 0, 0.3)",
+          zIndex: 1000,
+          fontSize: "14px",
+          fontWeight: "600",
+          display: "flex",
+          alignItems: "center",
+          gap: "8px",
+          direction: "rtl",
+          pointerEvents: "none",
+          animation: "fadeIn 0.2s ease-out"
+        }}>
+          <CheckCircle2 size={16} style={{ color: "var(--green)" }} />
+          <span>{toastMessage}</span>
+        </div>
+      )}
+
       {/* Header */}
       <header className="topbar">
         <div className="topbar-title" style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
@@ -352,25 +511,25 @@ export function DecisionsPage({ rows }: { rows: RecordRow[] }) {
 
       {/* KPI Cards Section */}
       <section className="kpi-grid">
-        <article className="kpi-card">
+        <article className="kpi-card" onClick={() => setActiveTab("all")} style={{ cursor: "pointer" }}>
           <div className="kpi-label">قرارات اليوم</div>
           <strong className="kpi-value">{kpiStats.createdToday}</strong>
           <span className="kpi-subtext">إجمالي القرارات الصادرة اليوم</span>
         </article>
         
-        <article className="kpi-card" style={{ borderRight: "3px solid var(--green)" }}>
+        <article className="kpi-card" onClick={() => setActiveTab("executed")} style={{ borderRight: "3px solid var(--green)", cursor: "pointer" }}>
           <div className="kpi-label">تم التنفيذ</div>
           <strong className="kpi-value" style={{ color: "var(--green)" }}>{kpiStats.executedToday}</strong>
           <span className="kpi-subtext">عمليات ناجحة على Meta اليوم</span>
         </article>
         
-        <article className="kpi-card" style={{ borderRight: "3px solid var(--muted)" }}>
+        <article className="kpi-card" onClick={() => setActiveTab("skipped")} style={{ borderRight: "3px solid var(--muted)", cursor: "pointer" }}>
           <div className="kpi-label">تم التخطي</div>
           <strong className="kpi-value" style={{ color: "var(--muted)" }}>{kpiStats.skippedToday}</strong>
           <span className="kpi-subtext">قرارات تم تجاوزها لظروف الحملة</span>
         </article>
         
-        <article className="kpi-card" style={{ borderRight: "3px solid var(--red)" }}>
+        <article className="kpi-card" onClick={() => setActiveTab("failed")} style={{ borderRight: "3px solid var(--red)", cursor: "pointer" }}>
           <div className="kpi-label">فشل التنفيذ</div>
           <strong className="kpi-value" style={{ color: "var(--red)" }}>{kpiStats.failedToday}</strong>
           <span className="kpi-subtext">إخفاقات في الكتابة إلى Meta</span>
@@ -491,6 +650,12 @@ export function DecisionsPage({ rows }: { rows: RecordRow[] }) {
           فشل التنفيذ
         </button>
         <button 
+          className={`tab-btn ${activeTab === "skipped" ? "tab-btn--active" : ""}`} 
+          onClick={() => setActiveTab("skipped")}
+        >
+          تم التخطي
+        </button>
+        <button 
           className={`tab-btn ${activeTab === "all" ? "tab-btn--active" : ""}`} 
           onClick={() => setActiveTab("all")}
         >
@@ -535,35 +700,28 @@ export function DecisionsPage({ rows }: { rows: RecordRow[] }) {
                 </thead>
                 <tbody>
                   {filteredRows.map(r => {
-                    const latestAction = getLatestAction(r);
                     const status = getDecisionStatus(r);
                     const target = getTargetInfo(r);
-                    const currency = (r.meta_ad_accounts as any)?.currency || "USD";
+                    const currency = String(r.currency || "USD");
                     const confidence = Number(r.confidence || 0);
                     
-                    // Format budget change text
+                    // Format budget change text using view direct metrics
                     let changeText = "—";
                     if (r.decision === "increase_budget" || r.decision === "decrease_budget") {
-                      if (latestAction) {
-                        changeText = formatBudgetChange(
-                          latestAction.before_state,
-                          latestAction.requested_state,
-                          latestAction.verified_state,
-                          Number((r.proposed_change as any)?.budget_change_pct || 0),
-                          currency
-                        );
+                      const beforeBudgetRaw = r.ad_set_daily_budget !== undefined && r.ad_set_daily_budget !== null 
+                        ? r.ad_set_daily_budget 
+                        : (r.campaign_daily_budget !== undefined && r.campaign_daily_budget !== null ? r.campaign_daily_budget : null);
+                      const beforeBudget = beforeBudgetRaw !== null ? Number(beforeBudgetRaw) : null;
+                      const pct = Number((r.proposed_change as any)?.budget_change_pct || 0);
+                      
+                      if (beforeBudget !== null && !isNaN(beforeBudget)) {
+                        const requestedBudget = beforeBudget * (1 + pct / 100);
+                        changeText = formatBudgetChange(beforeBudget, requestedBudget, null, pct, currency);
                       } else {
-                        const beforeBudget = r.meta_ad_sets ? (r.meta_ad_sets as any).daily_budget : (r.meta_campaigns ? (r.meta_campaigns as any).daily_budget : null);
-                        const pct = Number((r.proposed_change as any)?.budget_change_pct || 0);
-                        if (beforeBudget !== null) {
-                          const requestedBudget = beforeBudget * (1 + pct / 100);
-                          changeText = formatBudgetChange(beforeBudget, requestedBudget, null, pct, currency);
-                        } else {
-                          changeText = formatBudgetChange(null, null, null, pct, currency);
-                        }
+                        changeText = formatBudgetChange(null, null, null, pct, currency);
                       }
                     } else if (r.decision === "pause") {
-                      const entityType = latestAction?.meta_entity_type || (r.meta_ads ? "ad" : (r.meta_ad_sets ? "ad_set" : "campaign"));
+                      const entityType = r.meta_ad_id ? "ad" : (r.meta_adset_id ? "ad_set" : "campaign");
                       changeText = formatPauseResult(entityType);
                     }
 
@@ -612,12 +770,14 @@ export function DecisionsPage({ rows }: { rows: RecordRow[] }) {
                         <td>
                           <span style={{ fontSize: "13px", fontWeight: "500" }}>{changeText}</span>
                         </td>
-                        <td>{getStatusBadge(status)}</td>
+                        <td>{getStatusBadge(status, String(r.latest_status || ""), String(r.latest_error_code || ""))}</td>
                         <td className="hide-tablet">
                           <span className="ltr-val">{formatArabicDate(r.created_at)}</span>
                         </td>
                         <td className="hide-tablet">
-                          <span className="ltr-val">{latestAction?.executed_at ? formatArabicDate(latestAction.executed_at) : "—"}</span>
+                          <span className="ltr-val">
+                            {r.final_status_at && r.final_execution_status !== "pending" ? formatArabicDate(r.final_status_at) : "—"}
+                          </span>
                         </td>
                         <td>
                           <button 
@@ -642,28 +802,27 @@ export function DecisionsPage({ rows }: { rows: RecordRow[] }) {
           {/* Mobile Layout (Cards) */}
           <div className="mobile-cards-list">
             {filteredRows.map(r => {
-              const latestAction = getLatestAction(r);
               const status = getDecisionStatus(r);
               const target = getTargetInfo(r);
-              const currency = (r.meta_ad_accounts as any)?.currency || "USD";
+              const currency = String(r.currency || "USD");
               const confidence = Number(r.confidence || 0);
 
               let changeText = "—";
               if (r.decision === "increase_budget" || r.decision === "decrease_budget") {
-                if (latestAction) {
-                  changeText = formatBudgetChange(
-                    latestAction.before_state,
-                    latestAction.requested_state,
-                    latestAction.verified_state,
-                    Number((r.proposed_change as any)?.budget_change_pct || 0),
-                    currency
-                  );
+                const beforeBudgetRaw = r.ad_set_daily_budget !== undefined && r.ad_set_daily_budget !== null 
+                  ? r.ad_set_daily_budget 
+                  : (r.campaign_daily_budget !== undefined && r.campaign_daily_budget !== null ? r.campaign_daily_budget : null);
+                const beforeBudget = beforeBudgetRaw !== null ? Number(beforeBudgetRaw) : null;
+                const pct = Number((r.proposed_change as any)?.budget_change_pct || 0);
+                
+                if (beforeBudget !== null && !isNaN(beforeBudget)) {
+                  const requestedBudget = beforeBudget * (1 + pct / 100);
+                  changeText = formatBudgetChange(beforeBudget, requestedBudget, null, pct, currency);
                 } else {
-                  const pct = Number((r.proposed_change as any)?.budget_change_pct || 0);
                   changeText = formatBudgetChange(null, null, null, pct, currency);
                 }
               } else if (r.decision === "pause") {
-                const entityType = latestAction?.meta_entity_type || (r.meta_ads ? "ad" : (r.meta_ad_sets ? "ad_set" : "campaign"));
+                const entityType = r.meta_ad_id ? "ad" : (r.meta_adset_id ? "ad_set" : "campaign");
                 changeText = formatPauseResult(entityType);
               }
 
@@ -703,7 +862,7 @@ export function DecisionsPage({ rows }: { rows: RecordRow[] }) {
 
                   <div className="mobile-card-row">
                     <span className="mobile-card-label">الحالة</span>
-                    <span>{getStatusBadge(status)}</span>
+                    <span>{getStatusBadge(status, String(r.latest_status || ""), String(r.latest_error_code || ""))}</span>
                   </div>
 
                   <div className="mobile-card-divider" />
@@ -732,11 +891,31 @@ export function DecisionsPage({ rows }: { rows: RecordRow[] }) {
       <div className={`drawer ${selectedRow ? "drawer--open" : ""}`}>
         {selectedRow && (() => {
           const r = selectedRow as any;
-          const latestAction = getLatestAction(r);
-          const currency = (r.meta_ad_accounts as any)?.currency || "USD";
+          const currency = String(r.currency || "USD");
           const target = getTargetInfo(r);
           const metrics = extractMetricsFromSnapshot(r.input_snapshot, currency);
           const confidence = Number(r.confidence || 0);
+
+          // Find primary action: prefer latest verified, otherwise latest action
+          const primaryAction = (() => {
+            if (!decisionActions || decisionActions.length === 0) return null;
+            const verifiedActions = decisionActions.filter(a => a.status === "verified");
+            if (verifiedActions.length > 0) {
+              return [...verifiedActions].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
+            }
+            return [...decisionActions].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
+          })();
+
+          // Derive Budget Owner details
+          const budgetOwnerType = primaryAction?.meta_entity_type || 
+            (r.meta_ad_id && r.meta_ad_id !== "—" ? "ad" : 
+             r.meta_adset_id && r.meta_adset_id !== "—" ? "ad_set" : 
+             r.meta_campaign_id && r.meta_campaign_id !== "—" ? "campaign" : "—");
+
+          const budgetOwnerMetaId = primaryAction?.meta_entity_id || 
+            (r.meta_ad_id && r.meta_ad_id !== "—" ? r.meta_ad_id : 
+             r.meta_adset_id && r.meta_adset_id !== "—" ? r.meta_adset_id : 
+             r.meta_campaign_id && r.meta_campaign_id !== "—" ? r.meta_campaign_id : "—");
           
           return (
             <>
@@ -748,10 +927,36 @@ export function DecisionsPage({ rows }: { rows: RecordRow[] }) {
               </div>
               
               <div className="drawer-body">
+                {/* Style override for copy button */}
+                <style>{`
+                  .copy-btn-toast {
+                    background: var(--surface);
+                    border: 1px solid var(--border);
+                    color: var(--foreground);
+                    padding: 2px 8px;
+                    border-radius: 4px;
+                    font-size: 11px;
+                    cursor: pointer;
+                    margin-right: 6px;
+                    transition: all 0.15s ease;
+                  }
+                  .copy-btn-toast:hover {
+                    background: var(--border);
+                    border-color: var(--muted);
+                  }
+                `}</style>
+
                 {/* Section A: معلومات القرار */}
                 <div className="drawer-section">
                   <div className="drawer-section-title">معلومات القرار</div>
                   <div className="info-grid">
+                    <div className="info-item" style={{ gridColumn: "span 2" }}>
+                      <div className="info-label">Decision ID</div>
+                      <div className="info-value" style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                        <span className="ltr-val" style={{ fontSize: "12px", fontFamily: "monospace" }}>{String(r.id)}</span>
+                        <button className="copy-btn-toast" onClick={() => copyToClipboard(String(r.id), "Decision ID")}>نسخ</button>
+                      </div>
+                    </div>
                     <div className="info-item">
                       <div className="info-label">نوع القرار</div>
                       <div className="info-value">{translateDecision(r.decision)}</div>
@@ -760,11 +965,11 @@ export function DecisionsPage({ rows }: { rows: RecordRow[] }) {
                       <div className="info-label">مستوى الثقة</div>
                       <div className="info-value">{confidence}%</div>
                     </div>
-                    <div className="info-item">
+                    <div className="info-item" style={{ gridColumn: "span 2" }}>
                       <div className="info-label">الحساب الإعلاني</div>
-                      <div className="info-value">{name(r)}</div>
+                      <div className="info-value">{r.ad_account_name || "—"}</div>
                     </div>
-                    <div className="info-item">
+                    <div className="info-item" style={{ gridColumn: "span 2" }}>
                       <div className="info-label">الهدف</div>
                       <div className="info-value" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={target.name}>
                         {target.name} <span style={{ fontSize: "10px", color: "var(--muted)", fontWeight: "normal" }}>({target.label})</span>
@@ -775,21 +980,77 @@ export function DecisionsPage({ rows }: { rows: RecordRow[] }) {
                       <div className="info-value">{formatArabicDate(r.created_at)}</div>
                     </div>
                     <div className="info-item">
-                      <div className="info-label">وقت التنفيذ</div>
+                      <div className="info-label">وقت انتهاء الصلاحية</div>
                       <div className="info-value">
-                        {latestAction?.executed_at ? formatArabicDate(latestAction.executed_at) : "—"}
+                        {r.expires_at ? formatArabicDate(r.expires_at) : "—"}
                       </div>
                     </div>
                     <div className="info-item" style={{ gridColumn: "span 2" }}>
                       <div className="info-label">حالة التنفيذ</div>
                       <div className="info-value" style={{ marginTop: "4px" }}>
-                        {getStatusBadge(getDecisionStatus(r))}
+                        {getStatusBadge(r.final_execution_status, r.latest_status, r.latest_error_code)}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Section B: معلومات Meta */}
+                <div className="drawer-section">
+                  <div className="drawer-section-title">معلومات Meta</div>
+                  <div className="info-grid">
+                    <div className="info-item" style={{ gridColumn: "span 2" }}>
+                      <div className="info-label">Meta Ad Account ID</div>
+                      <div className="info-value" style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                        <span className="ltr-val" style={{ fontSize: "12px", fontFamily: "monospace" }}>{String(r.meta_account_id || "—")}</span>
+                        {r.meta_account_id && r.meta_account_id !== "—" && (
+                          <button className="copy-btn-toast" onClick={() => copyToClipboard(String(r.meta_account_id), "Meta Ad Account ID")}>نسخ</button>
+                        )}
+                      </div>
+                    </div>
+                    <div className="info-item" style={{ gridColumn: "span 2" }}>
+                      <div className="info-label">Meta Campaign ID</div>
+                      <div className="info-value" style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                        <span className="ltr-val" style={{ fontSize: "12px", fontFamily: "monospace" }}>{String(r.meta_campaign_id || "—")}</span>
+                        {r.meta_campaign_id && r.meta_campaign_id !== "—" && (
+                          <button className="copy-btn-toast" onClick={() => copyToClipboard(String(r.meta_campaign_id), "معرف الحملة")}>نسخ</button>
+                        )}
+                      </div>
+                    </div>
+                    <div className="info-item" style={{ gridColumn: "span 2" }}>
+                      <div className="info-label">Meta Ad Set ID</div>
+                      <div className="info-value" style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                        <span className="ltr-val" style={{ fontSize: "12px", fontFamily: "monospace" }}>{String(r.meta_adset_id || "—")}</span>
+                        {r.meta_adset_id && r.meta_adset_id !== "—" && (
+                          <button className="copy-btn-toast" onClick={() => copyToClipboard(String(r.meta_adset_id), "Meta Ad Set ID")}>نسخ</button>
+                        )}
+                      </div>
+                    </div>
+                    <div className="info-item" style={{ gridColumn: "span 2" }}>
+                      <div className="info-label">Meta Ad ID</div>
+                      <div className="info-value" style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                        <span className="ltr-val" style={{ fontSize: "12px", fontFamily: "monospace" }}>{String(r.meta_ad_id || "—")}</span>
+                        {r.meta_ad_id && r.meta_ad_id !== "—" && (
+                          <button className="copy-btn-toast" onClick={() => copyToClipboard(String(r.meta_ad_id), "Meta Ad ID")}>نسخ</button>
+                        )}
+                      </div>
+                    </div>
+                    <div className="info-item">
+                      <div className="info-label">Budget Owner Type</div>
+                      <div className="info-value">{translateEntityType(budgetOwnerType)}</div>
+                    </div>
+                    <div className="info-item">
+                      <div className="info-label">Budget Owner Meta ID</div>
+                      <div className="info-value" style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                        <span className="ltr-val" style={{ fontSize: "12px", fontFamily: "monospace" }}>{String(budgetOwnerMetaId || "—")}</span>
+                        {budgetOwnerMetaId && budgetOwnerMetaId !== "—" && (
+                          <button className="copy-btn-toast" onClick={() => copyToClipboard(String(budgetOwnerMetaId), "Budget Owner Meta ID")}>نسخ</button>
+                        )}
                       </div>
                     </div>
                   </div>
                 </div>
                 
-                {/* Section B: سبب القرار */}
+                {/* Section C: سبب القرار */}
                 <div className="drawer-section">
                   <div className="drawer-section-title">سبب القرار</div>
                   <p style={{ fontSize: "14px", lineHeight: "1.6", color: "var(--muted)", margin: "0 0 10px", background: "var(--surface-soft)", padding: "12px", borderRadius: "8px", border: "1px solid var(--border)" }}>
@@ -839,7 +1100,7 @@ export function DecisionsPage({ rows }: { rows: RecordRow[] }) {
                   )}
                 </div>
                 
-                {/* Section C: التغيير المطلوب */}
+                {/* Section D: التغيير المطلوب */}
                 <div className="drawer-section">
                   <div className="drawer-section-title">التغيير المطلوب والتنفيذ</div>
                   {r.decision === "increase_budget" || r.decision === "decrease_budget" ? (
@@ -847,23 +1108,23 @@ export function DecisionsPage({ rows }: { rows: RecordRow[] }) {
                       <div className="info-item">
                         <div className="info-label">الميزانية قبل التنفيذ</div>
                         <div className="info-value">
-                          {latestAction?.before_state ? formatCurrency(convertMinorUnits(latestAction.before_state, currency), currency) : "—"}
+                          {primaryAction?.before_state ? formatCurrency(convertMinorUnits(primaryAction.before_state, currency), currency) : "—"}
                         </div>
                       </div>
                       <div className="info-item">
                         <div className="info-label">الميزانية المطلوبة</div>
                         <div className="info-value">
-                          {latestAction?.requested_state ? formatCurrency(convertMinorUnits(latestAction.requested_state, currency), currency) : "—"}
+                          {primaryAction?.requested_state ? formatCurrency(convertMinorUnits(primaryAction.requested_state, currency), currency) : "—"}
                         </div>
                       </div>
                       <div className="info-item">
-                        <div className="info-label">الميزانية بعد التحقق</div>
+                        <div className="info-label">الميزانية المؤكدة من Meta</div>
                         <div className="info-value">
-                          {latestAction?.verified_state ? formatCurrency(convertMinorUnits(latestAction.verified_state, currency), currency) : "—"}
+                          {primaryAction?.verified_state ? formatCurrency(convertMinorUnits(primaryAction.verified_state, currency), currency) : "—"}
                         </div>
                       </div>
                       <div className="info-item">
-                        <div className="info-label">نسبة التغيير</div>
+                        <div className="info-label">نسبة التغيير المقترحة</div>
                         <div className="info-value" style={{ direction: "ltr", textAlign: "right" }}>
                           {Number((r.proposed_change as any)?.budget_change_pct || 0) > 0 ? "+" : ""}
                           {Number((r.proposed_change as any)?.budget_change_pct || 0)}%
@@ -875,7 +1136,7 @@ export function DecisionsPage({ rows }: { rows: RecordRow[] }) {
                       <div className="info-item">
                         <div className="info-label">الحالة قبل التنفيذ</div>
                         <div className="info-value">
-                          {latestAction?.before_state ? (String((latestAction.before_state as any)?.status || "ACTIVE") === "ACTIVE" ? "نشط (ACTIVE)" : "متوقف (PAUSED)") : "نشط (ACTIVE)"}
+                          {primaryAction?.before_state ? (String((primaryAction.before_state as any)?.status || "ACTIVE") === "ACTIVE" ? "نشط (ACTIVE)" : "متوقف (PAUSED)") : "نشط (ACTIVE)"}
                         </div>
                       </div>
                       <div className="info-item">
@@ -883,15 +1144,15 @@ export function DecisionsPage({ rows }: { rows: RecordRow[] }) {
                         <div className="info-value">متوقف (PAUSED)</div>
                       </div>
                       <div className="info-item">
-                        <div className="info-label">الحالة بعد التحقق</div>
+                        <div className="info-label">الحالة المؤكدة بعد التحقق</div>
                         <div className="info-value">
-                          {latestAction?.verified_state ? (String((latestAction.verified_state as any)?.status || (latestAction.verified_state as any)?.effective_status || "PAUSED") === "PAUSED" ? "متوقف (PAUSED)" : "نشط (ACTIVE)") : "—"}
+                          {primaryAction?.verified_state ? (String((primaryAction.verified_state as any)?.status || (primaryAction.verified_state as any)?.effective_status || "PAUSED") === "PAUSED" ? "متوقف (PAUSED)" : "نشط (ACTIVE)") : "—"}
                         </div>
                       </div>
                       <div className="info-item">
                         <div className="info-label">مستوى الإيقاف</div>
                         <div className="info-value">
-                          {translateEntityType(latestAction?.meta_entity_type || (r.meta_ads ? "ad" : (r.meta_ad_sets ? "ad_set" : "campaign")))}
+                          {translateEntityType(primaryAction?.meta_entity_type || (r.meta_ad_id ? "ad" : (r.meta_adset_id ? "ad_set" : "campaign")))}
                         </div>
                       </div>
                     </div>
@@ -900,64 +1161,177 @@ export function DecisionsPage({ rows }: { rows: RecordRow[] }) {
                   )}
                 </div>
                 
-                {/* Section D: سجل التنفيذ */}
-                <div className="drawer-section">
-                  <div className="drawer-section-title">سجل التنفيذ</div>
-                  <div className="timeline">
-                    <div className="timeline-item">
-                      <div className="timeline-dot timeline-dot--active" />
-                      <div className="timeline-content">
-                        <div className="timeline-title">تم إنشاء القرار</div>
-                        <div className="timeline-time">{formatArabicDate(r.created_at)}</div>
-                      </div>
-                    </div>
-                    
-                    <div className="timeline-item">
-                      <div className={`timeline-dot ${latestAction ? "timeline-dot--active" : ""}`} />
-                      <div className="timeline-content">
-                        <div className="timeline-title">تم إرسال الطلب إلى Meta</div>
-                        <div className="timeline-time">
-                          {latestAction?.created_at ? formatArabicDate(latestAction.created_at) : "—"}
+                {/* Section E: سجل التنفيذ (المحاولة الحالية) */}
+                {primaryAction && (
+                  <div className="drawer-section">
+                    <div className="drawer-section-title">محاولة التنفيذ الحالية</div>
+                    <div className="timeline">
+                      <div className="timeline-item">
+                        <div className="timeline-dot timeline-dot--active" />
+                        <div className="timeline-content">
+                          <div className="timeline-title">تم إنشاء القرار</div>
+                          <div className="timeline-time">{formatArabicDate(r.created_at)}</div>
                         </div>
                       </div>
-                    </div>
-                    
-                    <div className="timeline-item">
-                      <div className={`timeline-dot ${latestAction?.executed_at ? "timeline-dot--active" : ""}`} />
-                      <div className="timeline-content">
-                        <div className="timeline-title">تم التحقق من الحالة</div>
-                        <div className="timeline-time">
-                          {latestAction?.executed_at ? formatArabicDate(latestAction.executed_at) : "—"}
+                      
+                      <div className="timeline-item">
+                        <div className="timeline-dot timeline-dot--active" />
+                        <div className="timeline-content">
+                          <div className="timeline-title">تم إرسال الطلب إلى Meta</div>
+                          <div className="timeline-time">
+                            {formatArabicDate(primaryAction.created_at)}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                    
-                    <div className="timeline-item">
-                      <div className={`timeline-dot ${latestAction?.status === "verified" ? "timeline-dot--active" : (latestAction?.status === "failed" ? "timeline-dot--failed" : "")}`} />
-                      <div className="timeline-content">
-                        <div className="timeline-title">
-                          {latestAction?.status === "verified" ? "تم حفظ النتيجة وتأكيد التنفيذ" : (latestAction?.status === "failed" ? "فشل التنفيذ" : "بانتظار اكتمال التحقق")}
+                      
+                      {primaryAction.executed_at && (
+                        <div className="timeline-item">
+                          <div className="timeline-dot timeline-dot--active" />
+                          <div className="timeline-content">
+                            <div className="timeline-title">تم التحقق من الحالة</div>
+                            <div className="timeline-time">
+                              {formatArabicDate(primaryAction.executed_at)}
+                            </div>
+                          </div>
                         </div>
-                        <div className="timeline-time">
-                          {latestAction?.executed_at ? formatArabicDate(latestAction.executed_at) : "—"}
+                      )}
+                      
+                      <div className="timeline-item">
+                        <div className={`timeline-dot ${primaryAction.status === "verified" ? "timeline-dot--active" : (primaryAction.status === "failed" ? "timeline-dot--failed" : "")}`} />
+                        <div className="timeline-content">
+                          <div className="timeline-title">
+                            {primaryAction.status === "verified" ? "تم حفظ النتيجة وتأكيد التنفيذ" : (primaryAction.status === "failed" ? "فشل التنفيذ" : "بانتظار اكتمال التحقق")}
+                          </div>
+                          <div className="timeline-time">
+                            {primaryAction.executed_at ? formatArabicDate(primaryAction.executed_at) : "—"}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  </div>
-                </div>
-                
-                {/* Section E: الخطأ */}
-                {latestAction?.status === "failed" && (
-                  <div className="drawer-section" style={{ background: "var(--red-soft)", border: "1px solid var(--red)", padding: "12px", borderRadius: "8px" }}>
-                    <div className="drawer-section-title" style={{ color: "var(--red)", border: 0, padding: 0, marginBottom: "6px" }}>تفاصيل الخطأ</div>
-                    <div style={{ fontSize: "14px", color: "var(--red)", fontWeight: "600", display: "flex", gap: "6px", alignItems: "center" }}>
-                      <AlertOctagon size={16} />
-                      <span>{translateMetaError(latestAction.error_code, latestAction.error_message)}</span>
                     </div>
                   </div>
                 )}
                 
-                {/* Section F: التفاصيل التقنية */}
+                {/* Section F: تفاصيل الخطأ */}
+                {r.final_execution_status === "failed" && r.latest_error_code && (
+                  <div className="drawer-section" style={{ background: "var(--red-soft)", border: "1px solid var(--red)", padding: "12px", borderRadius: "8px" }}>
+                    <div className="drawer-section-title" style={{ color: "var(--red)", border: 0, padding: 0, marginBottom: "6px" }}>تفاصيل الخطأ</div>
+                    <div style={{ fontSize: "14px", color: "var(--red)", fontWeight: "600", display: "flex", gap: "6px", alignItems: "center" }}>
+                      <AlertOctagon size={16} />
+                      <span>{translateMetaError(r.latest_error_code, r.latest_error_message)}</span>
+                    </div>
+                  </div>
+                )}
+                
+                {/* Section G: سجل محاولات التنفيذ */}
+                <div className="drawer-section">
+                  <div className="drawer-section-title">سجل محاولات التنفيذ</div>
+                  
+                  {actionsLoading ? (
+                    <div style={{ padding: "16px 0", textAlign: "center", color: "var(--muted)" }}>
+                      جارٍ تحميل سجل محاولات التنفيذ...
+                    </div>
+                  ) : actionsError ? (
+                    <div style={{ padding: "12px", background: "var(--red-soft)", border: "1px solid var(--red)", borderRadius: "6px", color: "var(--red)", fontSize: "13px" }}>
+                      {actionsError}
+                    </div>
+                  ) : !decisionActions || decisionActions.length === 0 ? (
+                    <div style={{ padding: "16px 0", textAlign: "center", color: "var(--muted)", fontSize: "13.5px" }}>
+                      لا توجد محاولات تنفيذ مسجلة.
+                    </div>
+                  ) : (
+                    <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                      {decisionActions.map((action, idx) => {
+                        const actStatus = String(action.status);
+                        const isFailed = actStatus === "failed";
+                        const isSkipped = actStatus === "skipped";
+                        const isVerified = actStatus === "verified";
+                        
+                        let badgeClass = "badge--neutral";
+                        if (isVerified) badgeClass = "badge--success";
+                        else if (isFailed) badgeClass = "badge--failed";
+                        else if (actStatus === "executing" || actStatus === "queued") badgeClass = "badge--info";
+                        
+                        let attemptChange = "";
+                        if (r.decision === "increase_budget" || r.decision === "decrease_budget") {
+                          attemptChange = formatBudgetChange(
+                            action.before_state,
+                            action.requested_state,
+                            action.verified_state,
+                            0,
+                            currency
+                          );
+                        } else if (r.decision === "pause") {
+                          attemptChange = "إيقاف (PAUSED)";
+                        }
+
+                        return (
+                          <div 
+                            key={String(action.id || idx)} 
+                            style={{ 
+                              background: "var(--surface-soft)", 
+                              border: "1px solid var(--border)", 
+                              borderRadius: "8px", 
+                              padding: "12px",
+                              fontSize: "13px"
+                            }}
+                          >
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                              <span className={`badge ${badgeClass}`}>
+                                {translateActionStatus(actStatus)}
+                              </span>
+                              <span className="ltr-val" style={{ color: "var(--muted)", fontSize: "11.5px" }}>
+                                {formatArabicDate(action.created_at)}
+                              </span>
+                            </div>
+
+                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", color: "var(--muted)" }}>
+                              <div>
+                                <strong>المستوى:</strong> {translateEntityType(action.meta_entity_type)}
+                              </div>
+                              <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                <strong>معرف الكيان:</strong> <span className="ltr-val" style={{ fontSize: "11px", fontFamily: "monospace" }}>{String(action.meta_entity_id)}</span>
+                              </div>
+                              {action.executed_at && (
+                                <div style={{ gridColumn: "span 2" }}>
+                                  <strong>وقت التنفيذ:</strong> <span className="ltr-val">{formatArabicDate(action.executed_at)}</span>
+                                </div>
+                              )}
+                              {action.verified_at && (
+                                <div style={{ gridColumn: "span 2" }}>
+                                  <strong>وقت التحقق:</strong> <span className="ltr-val">{formatArabicDate(action.verified_at)}</span>
+                                </div>
+                              )}
+                              {attemptChange && (
+                                <div style={{ gridColumn: "span 2", marginTop: "4px" }}>
+                                  <strong>التغيير:</strong> <span style={{ color: "var(--foreground)", fontWeight: "500" }}>{attemptChange}</span>
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Error display if failed */}
+                            {isFailed && (action.error_code || action.error_message) && (
+                              <div style={{ marginTop: "8px", padding: "8px", background: "rgba(239, 68, 68, 0.08)", border: "1px dashed var(--red)", borderRadius: "6px", color: "var(--red)" }}>
+                                <strong>الخطأ:</strong> {translateMetaError(action.error_code, action.error_message)}
+                                <div style={{ fontSize: "11px", fontFamily: "monospace", marginTop: "4px", color: "var(--muted)" }}>
+                                  {action.error_message}
+                                </div>
+                              </div>
+                            )}
+                            
+                            {/* Skip reason display if skipped */}
+                            {isSkipped && action.error_code && (
+                              <div style={{ marginTop: "8px", padding: "8px", background: "var(--amber-soft)", borderRadius: "6px", color: "var(--amber)", border: "1px solid rgba(245, 158, 11, 0.15)" }}>
+                                <strong>سبب التخطي:</strong> {getSkippedReasonArabic(action.error_code)}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* Section H: التفاصيل التقنية */}
                 <div className="accordion">
                   <button className="accordion-toggle" onClick={() => setIsTechOpen(!isTechOpen)}>
                     <span>التفاصيل التقنية</span>
@@ -967,15 +1341,15 @@ export function DecisionsPage({ rows }: { rows: RecordRow[] }) {
                     <div className="accordion-body">
                       <pre className="tech-code-block">
 {`Decision ID: ${r.id}
-Action ID: ${latestAction?.id || "N/A"}
-Idempotency Key: ${latestAction?.idempotency_key || "N/A"}
-Meta Entity Type: ${latestAction?.meta_entity_type || (r.meta_ads ? "ad" : (r.meta_ad_sets ? "ad_set" : "campaign"))}
-Meta Entity ID: ${latestAction?.meta_entity_id || target.id}
-Before State: ${latestAction?.before_state ? JSON.stringify(latestAction.before_state, null, 2) : "N/A"}
-Requested State: ${latestAction?.requested_state ? JSON.stringify(latestAction.requested_state, null, 2) : "N/A"}
-Verified State: ${latestAction?.verified_state ? JSON.stringify(latestAction.verified_state, null, 2) : "N/A"}
-Raw Error Code: ${latestAction?.error_code || "N/A"}
-Raw Error Message: ${latestAction?.error_message || "N/A"}`}
+Action ID: ${primaryAction?.id || "N/A"}
+Idempotency Key: ${primaryAction?.idempotency_key || "N/A"}
+Meta Entity Type: ${primaryAction?.meta_entity_type || budgetOwnerType}
+Meta Entity ID: ${primaryAction?.meta_entity_id || budgetOwnerMetaId}
+Before State: ${primaryAction?.before_state ? JSON.stringify(primaryAction.before_state, null, 2) : "N/A"}
+Requested State: ${primaryAction?.requested_state ? JSON.stringify(primaryAction.requested_state, null, 2) : "N/A"}
+Verified State: ${primaryAction?.verified_state ? JSON.stringify(primaryAction.verified_state, null, 2) : "N/A"}
+Raw Error Code: ${primaryAction?.error_code || r.latest_error_code || "N/A"}
+Raw Error Message: ${primaryAction?.error_message || r.latest_error_message || "N/A"}`}
                       </pre>
                     </div>
                   )}
