@@ -1,5 +1,6 @@
 import "server-only";
 import { createClient } from "@/lib/supabase/server";
+import { DashboardApiResponse } from "@/types/dashboard";
 
 export type AccountRow = {
   id: string;
@@ -67,7 +68,14 @@ const generateDateRange = (since: string, until: string): string[] => {
   return dates;
 };
 
-export async function getDashboardData(days = 30, bypassCache = false) {
+interface DbInsightRow {
+  ad_account_id: string;
+  insight_date: string;
+  spend: number | null;
+  messaging_conversations: number | null;
+}
+
+export async function getDashboardData(days = 30, bypassCache = false): Promise<DashboardApiResponse> {
   const supabase = await createClient();
   const { since, until } = getSystemDateRange(days);
 
@@ -93,14 +101,14 @@ export async function getDashboardData(days = 30, bypassCache = false) {
     const cached = memoryCache.get(cacheKey);
     if (cached && Date.now() - cached.timestamp < 30000) {
       console.info("[dashboard-data] Returning cached dashboard data");
-      return cached.data;
+      return cached.data as DashboardApiResponse;
     }
   }
 
   // Fetch daily insights using paginated range queries to prevent row truncation
   console.info(`[dashboard-data] Querying database insights for range: ${since} to ${until} for connected accounts only.`);
   
-  const dbRows: Record<string, unknown>[] = [];
+  const dbRows: DbInsightRow[] = [];
   
   if (connectedIds.length > 0) {
     let dbPage = 0;
@@ -110,13 +118,13 @@ export async function getDashboardData(days = 30, bypassCache = false) {
     while (hasMoreDb) {
       const rangeStart = dbPage * dbPageSize;
       const rangeEnd = rangeStart + dbPageSize - 1;
-      const { data: pageData, error: dbError } = await supabase
+      const { data: pageData, error: dbError } = (await supabase
         .from("ad_insights_daily")
         .select("ad_account_id,insight_date,spend,messaging_conversations")
         .in("ad_account_id", connectedIds)
         .gte("insight_date", since)
         .lte("insight_date", until)
-        .range(rangeStart, rangeEnd);
+        .range(rangeStart, rangeEnd)) as { data: DbInsightRow[] | null; error: { message: string } | null };
 
       if (dbError) {
         throw new Error(`Database query error: ${dbError.message}`);

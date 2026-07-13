@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { Activity, BrainCircuit, LayoutDashboard, RefreshCw, Settings2, ShieldCheck, Target, Sun, Moon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { AccountRow, ChartPoint } from "@/lib/dashboard-data";
+import { isDashboardApiResponse, type DashboardApiResponse } from "@/types/dashboard";
 
 const nav = [
   ["/dashboard", "نظرة عامة", LayoutDashboard],
@@ -477,7 +478,7 @@ export function DashboardClient({ initial }: { initial: Data }) {
     };
   }, []);
 
-  async function load(d = days, refresh = false) {
+  async function load(d = days, refresh = false): Promise<DashboardApiResponse> {
     if (daysController.current) {
       daysController.current.abort();
     }
@@ -489,13 +490,20 @@ export function DashboardClient({ initial }: { initial: Data }) {
         cache: "no-store",
         signal: c.signal,
       });
-      if (!r.ok) throw Error();
-      const nextData = await r.json();
-      setData(nextData);
+      if (!r.ok) throw new Error("Failed to fetch dashboard data");
+      
+      const payload: unknown = await r.json();
+      if (!isDashboardApiResponse(payload)) {
+        throw new Error("Invalid dashboard API response");
+      }
+      
+      setData(payload);
+      return payload;
     } catch (e) {
       if (e instanceof Error && e.name !== "AbortError") {
         setNotice("تعذر تحميل البيانات للفترة المحددة.");
       }
+      throw e;
     } finally {
       if (!c.signal.aborted) {
         setLoadingDays(false);
