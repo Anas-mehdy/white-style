@@ -142,20 +142,40 @@ export function CampaignCenter({ accounts }: CampaignCenterProps) {
     }
 
     if (res.data) {
-      const newReq = res.data;
-      setActiveRequest(newReq);
-      setRequests((prev) => [newReq, ...prev]);
+      const newReq = Array.isArray(res.data) ? res.data[0] : res.data;
+      const reqId = newReq?.id || newReq?.request_id;
+      
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if (!reqId || !uuidRegex.test(reqId)) {
+        setErrorMessage("خطأ: لم يتم تلقي معرف طلب صالح (UUID) من الخادم. تعذر بدء المزامنة.");
+        return;
+      }
+
+      const normalizedReq = {
+        ...newReq,
+        id: reqId,
+        request_id: reqId,
+      };
+
+      setActiveRequest(normalizedReq);
+      setRequests((prev) => [normalizedReq, ...prev]);
 
       // Start the intake workflow polling
-      startPolling(newReq.id);
+      startPolling(reqId);
       
       // Automatically trigger resolve and strategy sequentially
-      triggerWorkflowChain(newReq.id);
+      triggerWorkflowChain(reqId);
     }
   };
 
   // Sequential workflow trigger helper
   const triggerWorkflowChain = async (requestId: string) => {
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!requestId || !uuidRegex.test(requestId)) {
+      setErrorMessage("خطأ: معرف الطلب غير صالح (UUID). تم إيقاف عملية التحليل.");
+      return;
+    }
+
     // Stage 1: Resolve post identifiers
     setIsResolving(true);
     const resolveRes = await resolveRequest(requestId);
@@ -177,28 +197,42 @@ export function CampaignCenter({ accounts }: CampaignCenterProps) {
   // 4. Manual retry actions
   const handleManualResolveRetry = async () => {
     if (!activeRequest) return;
+    const reqId = activeRequest.id || activeRequest.request_id;
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!reqId || !uuidRegex.test(reqId)) {
+      setErrorMessage("خطأ: معرف الطلب غير صالح (UUID). تعذر إعادة محاولة التحليل.");
+      return;
+    }
+
     setErrorMessage(null);
     setIsResolving(true);
-    const res = await resolveRequest(activeRequest.id);
+    const res = await resolveRequest(reqId);
     setIsResolving(false);
     if (res.error) {
       setErrorMessage(res.error);
     } else {
-      startPolling(activeRequest.id);
-      triggerWorkflowChain(activeRequest.id);
+      startPolling(reqId);
+      triggerWorkflowChain(reqId);
     }
   };
 
   const handleManualStrategyRetry = async () => {
     if (!activeRequest) return;
+    const reqId = activeRequest.id || activeRequest.request_id;
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!reqId || !uuidRegex.test(reqId)) {
+      setErrorMessage("خطأ: معرف الطلب غير صالح (UUID). تعذر إعادة محاولة توليد الاستراتيجية.");
+      return;
+    }
+
     setErrorMessage(null);
     setIsGeneratingStrategy(true);
-    const res = await generateStrategy(activeRequest.id);
+    const res = await generateStrategy(reqId);
     setIsGeneratingStrategy(false);
     if (res.error) {
       setErrorMessage(res.error);
     } else {
-      startPolling(activeRequest.id);
+      startPolling(reqId);
     }
   };
 

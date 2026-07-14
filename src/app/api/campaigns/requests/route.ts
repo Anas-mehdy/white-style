@@ -50,7 +50,11 @@ export async function POST(request: Request) {
       if (insErr) {
         console.error("Mock insert error:", insErr);
       }
-      return NextResponse.json(mockRequest);
+      return NextResponse.json({
+        ...mockRequest,
+        id: requestId,
+        request_id: requestId,
+      });
     }
 
     // 2. Production webhook call
@@ -89,8 +93,26 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: "رفض n8n استقبال طلب الحملة." }, { status: 502 });
       }
 
-      const data = await response.json();
-      return NextResponse.json(data);
+      let data = await response.json();
+      if (Array.isArray(data)) {
+        data = data[0] || {};
+      }
+
+      const reqId = data.request_id || data.id;
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+      if (!reqId || !uuidRegex.test(reqId)) {
+        return NextResponse.json(
+          { error: "لم يتم إرجاع معرف طلب صالح (UUID) من خادم n8n." },
+          { status: 502 }
+        );
+      }
+
+      return NextResponse.json({
+        ...data,
+        id: reqId,
+        request_id: reqId,
+      });
     } catch (err) {
       clearTimeout(timeout);
       const isTimeout = err instanceof Error && err.name === "AbortError";

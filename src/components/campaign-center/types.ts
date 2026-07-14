@@ -2,6 +2,7 @@
 
 export interface CampaignCreationRequest {
   id: string;
+  request_id?: string;
   organization_id: string;
   target_ad_account_id: string;
   target_meta_account_id: string | null;
