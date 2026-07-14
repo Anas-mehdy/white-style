@@ -1,5 +1,7 @@
 "use client";
 
+import { useRouter } from "next/navigation";
+
 import { useState, useEffect, useRef } from "react";
 import { WorkflowTimeline, TimelineStep } from "./workflow-timeline";
 import { ContentAnalysis } from "./content-analysis";
@@ -39,6 +41,8 @@ interface CampaignCenterProps {
 }
 
 export function CampaignCenter({ accounts }: CampaignCenterProps) {
+  const router = useRouter();
+
   // Campaign Requests state
   const [requests, setRequests] = useState<CampaignCreationRequest[]>([]);
   const [activeRequest, setActiveRequest] = useState<CampaignCreationRequest | null>(null);
@@ -234,21 +238,7 @@ export function CampaignCenter({ accounts }: CampaignCenterProps) {
         return;
       }
 
-      const normalizedReq = {
-        ...newReq,
-        id: reqId,
-        request_id: reqId,
-        status: newReq.status || "draft",
-      };
-
-      setActiveRequest(normalizedReq);
-      setRequests((prev) => [normalizedReq, ...prev]);
-
-      // Start the workflow polling
-      startPolling(reqId);
-      
-      // Automatically trigger WS-03 Strategy node
-      triggerStrategyGeneration(reqId);
+      router.push(`/campaigns/${reqId}/strategy`);
     }
   };
 
@@ -285,21 +275,7 @@ export function CampaignCenter({ accounts }: CampaignCenterProps) {
         return;
       }
 
-      const normalizedReq = {
-        ...newReq,
-        id: reqId,
-        request_id: reqId,
-        status: newReq.status || "draft",
-      };
-
-      setActiveRequest(normalizedReq);
-      setRequests((prev) => [normalizedReq, ...prev]);
-
-      // Start polling
-      startPolling(reqId);
-      
-      // Manual URL post requires WS-02 Resolve first
-      triggerResolveWorkflow(reqId);
+      router.push(`/campaigns/${reqId}/strategy`);
     }
   };
 
@@ -422,11 +398,12 @@ export function CampaignCenter({ accounts }: CampaignCenterProps) {
 
   // 10. Selection details helper from table row
   const handleSelectRequestFromTable = (req: CampaignCreationRequest) => {
-    setErrorMessage(null);
-    setActiveRequest(req);
-    setStrategies([]);
-    setSelectedStrategy(null);
-    startPolling(req.id);
+    const buildStatuses = ["building", "ready_for_review", "approved", "published"];
+    if (buildStatuses.includes(req.status)) {
+      router.push(`/campaigns/${req.id}/building`);
+    } else {
+      router.push(`/campaigns/${req.id}/strategy`);
+    }
   };
 
   // 11. Workflow timeline mapper

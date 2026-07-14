@@ -43,7 +43,7 @@ export interface CampaignCreationRequest {
   source_post_url: string;
   destination_type: 'whatsapp' | 'messenger' | 'website';
   execution_mode: 'dry_run' | 'live';
-  status: 'draft' | 'resolution_failed' | 'strategy_ready' | 'strategy_review_required' | 'building' | 'ready_for_review' | 'approved' | 'rejected' | 'published' | 'failed';
+  status: 'draft' | 'analyzing' | 'resolution_failed' | 'strategy_ready' | 'strategy_review_required' | 'building' | 'ready_for_review' | 'approved' | 'rejected' | 'published' | 'failed';
   requested_daily_budget: number | null;
   idempotency_key: string | null;
   request_payload: {

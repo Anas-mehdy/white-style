@@ -1,7 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { NextRequest, NextResponse } from "next/server";
 
-const TIMEOUT_MS = 25000;
+const TIMEOUT_MS = 15000; // 15 seconds fast ack timeout
 
 export async function POST(
   request: NextRequest,
@@ -20,41 +20,63 @@ export async function POST(
     const webhookUrl = process.env.N8N_WS04_BUILDER_WEBHOOK_URL;
     const secret = process.env.N8N_CAMPAIGN_WEBHOOK_SECRET;
 
-    // 1. Mock Mode Simulation
-    if (mockMode) {
-      const supabase = await createClient();
+    const supabase = await createClient();
 
-      // Update campaign request status to ready_for_review
-      const { data: updatedReq, error: reqErr } = await supabase
+    // 1. Fetch current status for duplicate protection check
+    const { data: currentReq, error: fetchErr } = await supabase
+      .from("campaign_creation_requests")
+      .select("status, request_payload")
+      .eq("id", requestId)
+      .maybeSingle();
+
+    if (fetchErr) {
+      return NextResponse.json({ error: fetchErr.message }, { status: 500 });
+    }
+
+    if (!currentReq) {
+      return NextResponse.json({ error: "الطلب غير موجود" }, { status: 404 });
+    }
+
+    const duplicateStatuses = ["building", "ready_for_review", "approved", "published"];
+    if (duplicateStatuses.includes(currentReq.status)) {
+      return NextResponse.json({
+        ok: true,
+        accepted: true,
+        request_id: requestId,
+        status: currentReq.status,
+        message: "حملة هذا الطلب قيد البناء أو مبنية بالفعل."
+      }, { status: 202 });
+    }
+
+    // 2. Mock Mode Simulation
+    if (mockMode) {
+      const updatedPayload = {
+        ...(currentReq.request_payload || {}),
+        mock_build_started_at: new Date().toISOString(),
+        mock_build_tier: tier
+      };
+
+      const { data: updatedReq, error: updateErr } = await supabase
         .from("campaign_creation_requests")
-        .update({ status: "ready_for_review" })
+        .update({
+          status: "building",
+          request_payload: updatedPayload
+        })
         .eq("id", requestId)
         .select()
         .single();
 
-      if (reqErr) return NextResponse.json({ error: reqErr.message }, { status: 500 });
+      if (updateErr) return NextResponse.json({ error: updateErr.message }, { status: 500 });
 
-      // Update strategies table to set build IDs
-      const { error: stratErr } = await supabase
-        .from("campaign_strategies")
-        .update({
-          status: "built_paused",
-          meta_campaign_id: "act_demo_camp_123456",
-          meta_adset_id: "act_demo_adset_123456",
-          meta_creative_id: "act_demo_creative_123456",
-          meta_ad_id: "act_demo_ad_123456",
-        })
-        .eq("request_id", requestId)
-        .eq("tier", tier);
-
-      if (stratErr) {
-        console.error("Mock strategy update error:", stratErr);
-      }
-
-      return NextResponse.json(updatedReq);
+      return NextResponse.json({
+        ok: true,
+        accepted: true,
+        request_id: requestId,
+        status: "building"
+      }, { status: 202 });
     }
 
-    // 2. Production webhook call
+    // 3. Production Webhook Call (Fast Acknowledgment)
     if (!webhookUrl || !secret) {
       return NextResponse.json(
         { error: "لم تُضبط إعدادات Campaign Builder Webhook على الخادم." },
@@ -62,7 +84,6 @@ export async function POST(
       );
     }
 
-    // DIRECT POST requests do not retry automatically.
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
@@ -88,13 +109,20 @@ export async function POST(
       }
 
       const data = await response.json();
-      return NextResponse.json(data);
+      return NextResponse.json({
+        ok: true,
+        accepted: true,
+        request_id: requestId,
+        status: "building",
+        n8n_response: data
+      }, { status: 202 });
+
     } catch (err) {
       clearTimeout(timeout);
       const isTimeout = err instanceof Error && err.name === "AbortError";
       return NextResponse.json(
-        { error: isTimeout ? "انتهت مهلة استدعاء Builder Webhook في n8n." : "فشل استدعاء n8n." },
-        { status: 502 }
+        { error: isTimeout ? "انتهت مهلة استدعاء Builder Webhook في n8n (Fast ACK)." : "فشل استدعاء n8n." },
+        { status: 503 }
       );
     }
   } catch (err) {
