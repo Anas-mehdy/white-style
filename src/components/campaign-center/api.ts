@@ -1,9 +1,19 @@
 "use client";
 
-import { CampaignCreationRequest, CampaignStrategy } from "./types";
+import { CampaignCreationRequest, CampaignStrategy, ContentLibraryItem } from "./types";
 
 export interface ApiResponse<T> {
   data?: T;
+  error?: string;
+}
+
+export interface PaginatedResponse<T> {
+  items: T[];
+  pagination: {
+    total: number;
+    limit: number;
+    offset: number;
+  };
   error?: string;
 }
 
@@ -26,9 +36,70 @@ async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutM
   }
 }
 
+// 1. Fetch Content Library Items
+export async function fetchContent(params: {
+  platform?: string;
+  contentType?: string;
+  status?: string;
+  search?: string;
+  sortBy?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<PaginatedResponse<ContentLibraryItem>> {
+  try {
+    const query = new URLSearchParams();
+    if (params.platform) query.set("platform", params.platform);
+    if (params.contentType) query.set("content_type", params.contentType);
+    if (params.status) query.set("status", params.status);
+    if (params.search) query.set("search", params.search);
+    if (params.sortBy) query.set("sort_by", params.sortBy);
+    if (params.limit !== undefined) query.set("limit", String(params.limit));
+    if (params.offset !== undefined) query.set("offset", String(params.offset));
+
+    const res = await fetchWithTimeout(`/api/content?${query.toString()}`, { cache: "no-store" });
+    const data = await res.json();
+    if (!res.ok) {
+      return { items: [], pagination: { total: 0, limit: 12, offset: 0 }, error: data.error || "فشل جلب المحتوى" };
+    }
+    return data;
+  } catch (err) {
+    return {
+      items: [],
+      pagination: { total: 0, limit: 12, offset: 0 },
+      error: err instanceof Error ? err.message : "فشل جلب المحتوى"
+    };
+  }
+}
+
+// 2. Fetch Single Content Item details
+export async function fetchContentDetails(contentId: string): Promise<ApiResponse<ContentLibraryItem>> {
+  try {
+    const res = await fetchWithTimeout(`/api/content/${contentId}`, { cache: "no-store" });
+    const data = await res.json();
+    if (!res.ok) return { error: data.error || "فشل جلب تفاصيل المحتوى" };
+    return { data };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "فشل جلب تفاصيل المحتوى" };
+  }
+}
+
+// 3. Sync Content Library from Meta
+export async function syncContent(): Promise<ApiResponse<{ success: boolean; summary: string }>> {
+  try {
+    const res = await fetchWithTimeout("/api/content/sync", { method: "POST" }, 30000); // 30s timeout for sync
+    const data = await res.json();
+    if (!res.ok) return { error: data.error || "فشلت مزامنة المحتوى" };
+    return { data };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "فشلت مزامنة المحتوى" };
+  }
+}
+
+// 4. Create Campaign request (URL or Content Selection)
 export async function createRequest(payload: {
+  content_library_id?: string;
   target_ad_account_id: string;
-  source_post_url: string;
+  source_post_url?: string;
   destination_type: string;
   requested_daily_budget: number | null;
   execution_mode: string;

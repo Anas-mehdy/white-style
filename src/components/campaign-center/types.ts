@@ -1,5 +1,38 @@
 "use client";
 
+export interface ContentLibraryItem {
+  id: string;
+  account_id: string | null;
+  platform: "facebook" | "instagram";
+  content_type: "post" | "reel" | "video" | "carousel" | "photo";
+  meta_post_id: string;
+  page_id: string | null;
+  instagram_media_id: string | null;
+  caption: string | null;
+  permalink: string | null;
+  thumbnail_url: string | null;
+  media_url: string | null;
+  media_type: string | null;
+  created_time: string | null;
+  likes_count: number;
+  comments_count: number;
+  shares_count: number;
+  is_promoted: boolean;
+  promotion_count: number;
+  last_campaign_id: string | null;
+  status:
+    | "NEW"
+    | "ANALYZED"
+    | "READY"
+    | "PROMOTED"
+    | "RUNNING"
+    | "FINISHED"
+    | "ARCHIVED";
+  raw_payload: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface CampaignCreationRequest {
   id: string;
   request_id?: string;
@@ -14,6 +47,18 @@ export interface CampaignCreationRequest {
   requested_daily_budget: number | null;
   idempotency_key: string | null;
   request_payload: {
+    resolver_status?: "pending" | "resolved" | "failed";
+    resolver_method?: "link" | "content_library";
+    content_library_id?: string;
+    source_post_id?: string;
+    instagram_media_id?: string;
+    page_id?: string;
+    content_context?: {
+      caption?: string;
+      media_type?: string;
+      thumbnail_url?: string;
+      permalink?: string;
+    };
     content_analysis?: {
       platform: string;
       media_type: string;

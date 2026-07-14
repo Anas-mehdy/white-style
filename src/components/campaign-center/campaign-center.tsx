@@ -1,14 +1,13 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { RequestForm } from "./request-form";
 import { WorkflowTimeline, TimelineStep } from "./workflow-timeline";
 import { ContentAnalysis } from "./content-analysis";
 import { StrategySelector } from "./strategy-selector";
 import { CampaignPreview } from "./campaign-preview";
 import { BuildSummary } from "./build-summary";
 import { RecentRequests } from "./recent-requests";
-import { CampaignCreationRequest, CampaignStrategy } from "./types";
+import { CampaignCreationRequest, CampaignStrategy, ContentLibraryItem } from "./types";
 import {
   createRequest,
   resolveRequest,
@@ -17,9 +16,16 @@ import {
   buildCampaign,
   fetchRequests,
   fetchRequestDetails,
+  fetchContent,
+  syncContent,
 } from "./api";
-import { PageHeader } from "@/components/dashboard";
-import { AlertCircle, BrainCircuit, RefreshCw, RefreshCcw } from "lucide-react";
+import { ContentLibrary } from "./content-library";
+import { ContentSyncButton } from "./content-sync-button";
+import { ContentDetails } from "./content-details";
+import { ContentAIEditor } from "./content-ai-editor";
+import { ContentSelectionDrawer } from "./content-selection-drawer";
+import { RequestForm } from "./request-form";
+import { AlertCircle, BrainCircuit, RefreshCw, RefreshCcw, ArrowRight, Library, Link, AlertTriangle } from "lucide-react";
 import { motion } from "framer-motion";
 
 interface Account {
@@ -33,6 +39,7 @@ interface CampaignCenterProps {
 }
 
 export function CampaignCenter({ accounts }: CampaignCenterProps) {
+  // Campaign Requests state
   const [requests, setRequests] = useState<CampaignCreationRequest[]>([]);
   const [activeRequest, setActiveRequest] = useState<CampaignCreationRequest | null>(null);
   const [strategies, setStrategies] = useState<CampaignStrategy[]>([]);
@@ -45,17 +52,49 @@ export function CampaignCenter({ accounts }: CampaignCenterProps) {
   const [isGeneratingStrategy, setIsGeneratingStrategy] = useState(false);
   const [isSelectingStrategy, setIsSelectingStrategy] = useState(false);
 
+  // Content Library state
+  const [contentItems, setContentItems] = useState<ContentLibraryItem[]>([]);
+  const [isLoadingContent, setIsLoadingContent] = useState(false);
+  const [isSyncingContent, setIsSyncingContent] = useState(false);
+  const [syncSummary, setSyncSummary] = useState<string | null>(null);
+  const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
+  const [contentPagination, setContentPagination] = useState({ total: 0, limit: 12, offset: 0 });
+
+  // Filter/Search/Sort state
+  const [searchQuery, setSearchQuery] = useState("");
+  const [activeFilters, setActiveFilters] = useState({ platform: "all", contentType: "all", status: "all" });
+  const [sortBy, setSortBy] = useState("newest");
+
+  // Drawers state
+  const [selectedItemForDetails, setSelectedItemForDetails] = useState<ContentLibraryItem | null>(null);
+  const [isDetailsOpen, setIsDetailsOpen] = useState(false);
+
+  const [selectedItemForAIEditor, setSelectedItemForAIEditor] = useState<ContentLibraryItem | null>(null);
+  const [isAIEditorOpen, setIsAIEditorOpen] = useState(false);
+
+  const [selectedItemForCampaign, setSelectedItemForCampaign] = useState<ContentLibraryItem | null>(null);
+  const [isCampaignDrawerOpen, setIsCampaignDrawerOpen] = useState(false);
+
+  // Fallback section toggler
+  const [showManualFallback, setShowManualFallback] = useState(false);
+
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [pollErrorCount, setPollErrorCount] = useState(0);
 
-  // Polling ref to clear interval
+  // Polling ref
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // 1. Fetch recent requests on mount
+  // 1. Fetch content & requests on mount
   useEffect(() => {
     loadRequests();
+    loadContentLibrary();
     return () => stopPolling();
   }, []);
+
+  // 2. Fetch content library items when parameters change
+  useEffect(() => {
+    loadContentLibrary();
+  }, [searchQuery, activeFilters, sortBy, contentPagination.offset]);
 
   const loadRequests = async () => {
     setIsLoadingRequests(true);
@@ -68,7 +107,28 @@ export function CampaignCenter({ accounts }: CampaignCenterProps) {
     }
   };
 
-  // 2. Polling active request details
+  const loadContentLibrary = async () => {
+    setIsLoadingContent(true);
+    const res = await fetchContent({
+      search: searchQuery,
+      platform: activeFilters.platform,
+      contentType: activeFilters.contentType,
+      status: activeFilters.status,
+      sortBy,
+      limit: contentPagination.limit,
+      offset: contentPagination.offset,
+    });
+    setIsLoadingContent(false);
+    
+    if (res.error) {
+      setErrorMessage(res.error);
+    } else {
+      setContentItems(res.items || []);
+      setContentPagination(res.pagination);
+    }
+  };
+
+  // 3. Polling active request details
   const startPolling = (requestId: string) => {
     stopPolling();
     setPollErrorCount(0);
@@ -88,9 +148,13 @@ export function CampaignCenter({ accounts }: CampaignCenterProps) {
         setActiveRequest(request);
         setStrategies(strats);
 
-        // Update selected strategy based on selected column
-        const selected = strats.find((s) => s.selected);
-        setSelectedStrategy(selected || null);
+        // Find selected strategy
+        const selected = strats.find((s) => s.selected === true);
+        if (selected) {
+          setSelectedStrategy(selected);
+        } else {
+          setSelectedStrategy(null);
+        }
 
         // Update requests table list
         setRequests((prev) =>
@@ -100,9 +164,9 @@ export function CampaignCenter({ accounts }: CampaignCenterProps) {
         // Stop polling if request reaches a terminal or final review state
         const stopStatuses = ["resolution_failed", "ready_for_review", "published", "failed", "approved", "rejected"];
         if (stopStatuses.includes(request.status)) {
-          // Exception: If status is strategy_ready but we have no strategies, keep polling or let user retry
+          // Exception: If status is strategy_ready but we have no strategies, keep polling for DB synchronization skew
           if (request.status === "strategy_ready" && strats.length === 0) {
-            // Keep polling for data synchronization skew
+            // Keep polling
           } else {
             stopPolling();
           }
@@ -118,8 +182,78 @@ export function CampaignCenter({ accounts }: CampaignCenterProps) {
     }
   };
 
-  // 3. Handle new campaign request submit
-  const handleCreateRequest = async (formData: {
+  // 4. Trigger Meta Content Sync
+  const handleContentSync = async () => {
+    setIsSyncingContent(true);
+    setSyncSummary(null);
+    const res = await syncContent();
+    setIsSyncingContent(false);
+
+    if (res.error) {
+      setErrorMessage(res.error);
+    } else if (res.data) {
+      setSyncSummary(res.data.summary || "تم تحديث المحتوى بنجاح");
+      setLastSyncTime(new Date().toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
+      // Reset pagination offset and reload content
+      setContentPagination(prev => ({ ...prev, offset: 0 }));
+      loadContentLibrary();
+    }
+  };
+
+  // 5. Handle creation request from Content Library Drawer
+  const handleCreateRequestFromLibrary = async (formData: {
+    content_library_id: string;
+    target_ad_account_id: string;
+    destination_type: 'whatsapp' | 'messenger' | 'website';
+    requested_daily_budget: number | null;
+    execution_mode: 'dry_run' | 'live';
+    placements: 'advantage_plus' | 'facebook_only' | 'instagram_only';
+  }) => {
+    setIsSubmitting(true);
+    setErrorMessage(null);
+    setActiveRequest(null);
+    setStrategies([]);
+    setSelectedStrategy(null);
+    setIsCampaignDrawerOpen(false);
+
+    const res = await createRequest(formData);
+    setIsSubmitting(false);
+
+    if (res.error) {
+      setErrorMessage(res.error);
+      return;
+    }
+
+    if (res.data) {
+      const newReq = Array.isArray(res.data) ? res.data[0] : res.data;
+      const reqId = newReq?.id || newReq?.request_id;
+      
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if (!reqId || !uuidRegex.test(reqId)) {
+        setErrorMessage("خطأ: لم يتم تلقي معرف طلب صالح (UUID) من الخادم. تعذر بدء المزامنة.");
+        return;
+      }
+
+      const normalizedReq = {
+        ...newReq,
+        id: reqId,
+        request_id: reqId,
+        status: newReq.status || "draft",
+      };
+
+      setActiveRequest(normalizedReq);
+      setRequests((prev) => [normalizedReq, ...prev]);
+
+      // Start the workflow polling
+      startPolling(reqId);
+      
+      // Automatically trigger WS-03 Strategy node
+      triggerStrategyGeneration(reqId);
+    }
+  };
+
+  // 6. Handle Manual Link Creation submit (Fallback Option)
+  const handleCreateManualRequest = async (formData: {
     target_ad_account_id: string;
     source_post_url: string;
     destination_type: 'whatsapp' | 'messenger' | 'website';
@@ -155,46 +289,45 @@ export function CampaignCenter({ accounts }: CampaignCenterProps) {
         ...newReq,
         id: reqId,
         request_id: reqId,
+        status: newReq.status || "draft",
       };
 
       setActiveRequest(normalizedReq);
       setRequests((prev) => [normalizedReq, ...prev]);
 
-      // Start the intake workflow polling
+      // Start polling
       startPolling(reqId);
       
-      // Automatically trigger resolve and strategy sequentially
-      triggerWorkflowChain(reqId);
+      // Manual URL post requires WS-02 Resolve first
+      triggerResolveWorkflow(reqId);
     }
   };
 
-  // Sequential workflow trigger helper
-  const triggerWorkflowChain = async (requestId: string) => {
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    if (!requestId || !uuidRegex.test(requestId)) {
-      setErrorMessage("خطأ: معرف الطلب غير صالح (UUID). تم إيقاف عملية التحليل.");
-      return;
-    }
-
-    // Stage 1: Resolve post identifiers
+  const triggerResolveWorkflow = async (requestId: string) => {
     setIsResolving(true);
     const resolveRes = await resolveRequest(requestId);
     setIsResolving(false);
+
     if (resolveRes.error) {
       setErrorMessage(resolveRes.error);
       return;
     }
 
-    // Stage 2: Generate strategy (after resolution succeeded or request status updated)
+    // After resolution succeeded, trigger WS-03 Strategist explicitly
+    triggerStrategyGeneration(requestId);
+  };
+
+  const triggerStrategyGeneration = async (requestId: string) => {
     setIsGeneratingStrategy(true);
     const strategyRes = await generateStrategy(requestId);
     setIsGeneratingStrategy(false);
+
     if (strategyRes.error) {
       setErrorMessage(strategyRes.error);
     }
   };
 
-  // 4. Manual retry actions
+  // 7. Manual retry actions
   const handleManualResolveRetry = async () => {
     if (!activeRequest) return;
     const reqId = activeRequest.id || activeRequest.request_id;
@@ -212,7 +345,7 @@ export function CampaignCenter({ accounts }: CampaignCenterProps) {
       setErrorMessage(res.error);
     } else {
       startPolling(reqId);
-      triggerWorkflowChain(reqId);
+      triggerStrategyGeneration(reqId);
     }
   };
 
@@ -243,23 +376,22 @@ export function CampaignCenter({ accounts }: CampaignCenterProps) {
     if (res.error) {
       setErrorMessage(res.error);
     } else if (res.data) {
-      setActiveRequest(res.data.request);
-      setStrategies(res.data.strategies);
-      const selected = res.data.strategies.find((s) => s.selected);
-      setSelectedStrategy(selected || null);
-      
-      if (["draft", "building"].includes(res.data.request.status)) {
-        startPolling(res.data.request.id);
+      const { request, strategies: strats } = res.data;
+      setActiveRequest(request);
+      setStrategies(strats);
+
+      const selected = strats.find((s) => s.selected === true);
+      if (selected) {
+        setSelectedStrategy(selected);
       }
     }
   };
 
-  // 5. Select strategy tier
-  const handleSelectTier = async (tier: 'conservative' | 'balanced' | 'aggressive') => {
+  // 8. Select Strategy
+  const handleSelectStrategy = async (tier: 'conservative' | 'balanced' | 'aggressive') => {
     if (!activeRequest) return;
-    setIsSelectingStrategy(true);
     setErrorMessage(null);
-
+    setIsSelectingStrategy(true);
     const res = await selectStrategy(activeRequest.id, tier);
     setIsSelectingStrategy(false);
 
@@ -267,17 +399,16 @@ export function CampaignCenter({ accounts }: CampaignCenterProps) {
       setErrorMessage(res.error);
     } else if (res.data) {
       setSelectedStrategy(res.data);
-      // Refresh details to ensure selected column matches
+      // Refresh requests data
       handleRefreshRequestDetails();
     }
   };
 
-  // 6. Build campaign on Meta
+  // 9. Build campaign
   const handleBuildCampaign = async () => {
     if (!activeRequest || !selectedStrategy) return;
-    setIsBuilding(true);
     setErrorMessage(null);
-
+    setIsBuilding(true);
     const res = await buildCampaign(activeRequest.id, selectedStrategy.tier);
     setIsBuilding(false);
 
@@ -285,280 +416,374 @@ export function CampaignCenter({ accounts }: CampaignCenterProps) {
       setErrorMessage(res.error);
     } else if (res.data) {
       setActiveRequest(res.data);
-      startPolling(res.data.id);
+      startPolling(activeRequest.id);
     }
   };
 
-  // 7. Select past request from recent requests table
-  const handleSelectPastRequest = (req: CampaignCreationRequest) => {
+  // 10. Selection details helper from table row
+  const handleSelectRequestFromTable = (req: CampaignCreationRequest) => {
     setErrorMessage(null);
     setActiveRequest(req);
     setStrategies([]);
     setSelectedStrategy(null);
-    
-    // Fetch latest details & start polling if it is in progress
-    fetchRequestDetails(req.id).then((res) => {
-      if (res.data) {
-        setActiveRequest(res.data.request);
-        setStrategies(res.data.strategies);
-        const selected = res.data.strategies.find((s) => s.selected);
-        setSelectedStrategy(selected || null);
-        
-        if (["draft", "building"].includes(res.data.request.status)) {
-          startPolling(res.data.request.id);
-        } else {
-          stopPolling();
-        }
-      }
-    });
+    startPolling(req.id);
   };
 
-  // Calculate timeline step states
+  // 11. Workflow timeline mapper
   const getTimelineSteps = (): TimelineStep[] => {
-    const status = activeRequest?.status || "draft";
+    if (!activeRequest) return [];
+
+    const status = activeRequest.status;
+    const isLibraryResolved = activeRequest.request_payload?.resolver_status === "resolved";
+
+    const isCreatedCompleted = true;
     
-    const steps: TimelineStep[] = [
-      { key: "created", label: "تم إنشاء الطلب", state: "completed" },
-      { key: "resolved", label: "تم تحليل المنشور ورابطه", state: "pending" },
-      { key: "analysed", label: "تحليل المحتوى بالذكاء الاصطناعي", state: "pending" },
-      { key: "strategy", label: "الاستراتيجية جاهزة للمراجعة", state: "pending" },
-      { key: "building", label: "بناء الحملة الإعلانية", state: "pending" },
-      { key: "ready", label: "جاهز للمراجعة والتدقيق", state: "pending" },
+    const isResolvedCompleted = isLibraryResolved || ["strategy_ready", "strategy_review_required", "building", "ready_for_review", "published", "failed", "approved"].includes(status);
+    const isResolvedRunning = !isLibraryResolved && status === "draft" && isResolving;
+    const isResolvedFailed = status === "resolution_failed";
+
+    const isStrategyCompleted = ["strategy_ready", "strategy_review_required", "building", "ready_for_review", "published", "failed", "approved"].includes(status);
+    const isStrategyRunning = status === "draft" && isLibraryResolved && isGeneratingStrategy;
+    const isStrategyFailed = false;
+
+    const isStrategyReadyCompleted = ["strategy_ready", "building", "ready_for_review", "published", "approved"].includes(status) && strategies.length > 0;
+    const isStrategyReadyWarning = status === "strategy_ready" && strategies.length === 0;
+
+    const isBuildingCompleted = ["ready_for_review", "published", "approved"].includes(status);
+    const isBuildingRunning = status === "building" || isBuilding;
+    const isBuildingFailed = status === "failed" && activeRequest.error_code === "build_failed";
+
+    const isReadyCompleted = ["ready_for_review", "published", "approved"].includes(status);
+
+    return [
+      { key: "created", label: "بدء طلب الحملة إلكترونياً", state: "completed" },
+      {
+        key: "resolved",
+        label: isLibraryResolved ? "منشور محدد من المكتبة (تخطي الحل)" : "تحليل وحل رابط المنشور المستهدف",
+        state: isResolvedFailed ? "failed" : isResolvedRunning ? "running" : isResolvedCompleted ? "completed" : "pending"
+      },
+      {
+        key: "strategy",
+        label: "توليد استراتيجيات الذكاء الاصطناعي",
+        state: isStrategyRunning ? "running" : isStrategyCompleted ? "completed" : "pending"
+      },
+      {
+        key: "strategy_ready",
+        label: "الاستراتيجية جاهزة للمراجعة والقبول",
+        state: isStrategyReadyWarning ? "failed" : isStrategyReadyCompleted ? "completed" : "pending"
+      },
+      {
+        key: "building",
+        label: "جاري بناء الحملة في الحساب الإعلاني",
+        state: isBuildingFailed ? "failed" : isBuildingRunning ? "running" : isBuildingCompleted ? "completed" : "pending"
+      },
+      {
+        key: "ready",
+        label: "الحملة جاهزة للمراجعة كـ PAUSED",
+        state: isReadyCompleted ? "completed" : "pending"
+      }
     ];
-
-    // Stage 1: Resolve Post
-    if (isResolving) {
-      steps[1].state = "running";
-    } else if (status === "resolution_failed") {
-      steps[1].state = "failed";
-    } else if (status !== "draft") {
-      steps[1].state = "completed";
-    }
-
-    // Stage 2: Content Analysis
-    if (activeRequest?.request_payload?.content_analysis) {
-      steps[2].state = "completed";
-    } else if (isResolving) {
-      steps[2].state = "pending";
-    } else if (status === "resolution_failed") {
-      steps[2].state = "failed";
-    } else if (status !== "draft") {
-      steps[2].state = "completed";
-    }
-
-    // Stage 3: Strategy Ready
-    if (isGeneratingStrategy) {
-      steps[3].state = "running";
-    } else if (["strategy_ready", "strategy_review_required", "building", "ready_for_review", "approved", "published"].includes(status)) {
-      steps[3].state = "completed";
-    } else if (status === "failed") {
-      steps[3].state = "failed";
-    }
-
-    // Stage 4: Campaign Building
-    if (isBuilding || status === "building") {
-      steps[4].state = "running";
-    } else if (["ready_for_review", "approved", "published"].includes(status)) {
-      steps[4].state = "completed";
-    } else if (status === "failed") {
-      steps[4].state = "failed";
-    }
-
-    // Stage 5: Ready for Review
-    if (["ready_for_review", "approved", "published"].includes(status)) {
-      steps[5].state = "completed";
-    } else if (status === "failed") {
-      steps[5].state = "failed";
-    }
-
-    return steps;
   };
 
-  const steps = getTimelineSteps();
+  // Card triggers
+  const handleSelectForCampaign = (item: ContentLibraryItem) => {
+    setSelectedItemForCampaign(item);
+    setIsCampaignDrawerOpen(true);
+  };
 
-  // Condition check for integration gap (status strategy_ready but no strategy rows exist in campaign_strategies)
-  const isStrategyReady = ["strategy_ready", "strategy_review_required"].includes(activeRequest?.status || "");
-  const hasNoStrategies = isStrategyReady && strategies.length === 0;
+  const handleShowDetails = (item: ContentLibraryItem) => {
+    setSelectedItemForDetails(item);
+    setIsDetailsOpen(true);
+  };
+
+  const handleShowAIEditor = (item: ContentLibraryItem) => {
+    setSelectedItemForAIEditor(item);
+    setIsAIEditorOpen(true);
+  };
 
   return (
-    <>
-      <PageHeader title="إنشاء الحملات الذكية" />
-
-      {errorMessage && (
-        <div
-          style={{
-            background: "rgba(239, 68, 68, 0.1)",
-            border: "1px solid rgb(239, 68, 68)",
-            borderRadius: "10px",
-            padding: "14px 16px",
-            marginBottom: "20px",
-            color: "rgb(239, 68, 68)",
-            fontSize: "14px",
-            fontWeight: "500",
-            display: "flex",
-            alignItems: "center",
-            gap: "10px",
-            justifyContent: "space-between"
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            <AlertCircle size={18} />
-            <span>{errorMessage}</span>
+    <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+      {/* 1. Page Header (Standard Layout) */}
+      {!activeRequest ? (
+        <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", alignItems: "center", gap: "16px", marginBottom: "8px" }}>
+          <div>
+            <h1 style={{ fontSize: "20px", fontWeight: "700", display: "flex", alignItems: "center", gap: "8px" }}>
+              <Library size={22} style={{ color: "var(--blue)" }} />
+              مكتبة المحتوى وإنشاء الحملات
+            </h1>
+            <p style={{ color: "var(--muted)", fontSize: "13px", marginTop: "4px" }}>
+              اختر منشورًا أو Reel من حسابات White Style ثم حلله وأنشئ له حملة إعلانية ذكية.
+            </p>
           </div>
+
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "6px" }}>
+            <ContentSyncButton
+              onSync={handleContentSync}
+              isSyncing={isSyncingContent}
+              lastSyncTime={lastSyncTime}
+            />
+            {syncSummary && !isSyncingContent && (
+              <span style={{ fontSize: "11.5px", color: "var(--muted)" }}>
+                {syncSummary}
+              </span>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "8px" }}>
           <button
-            onClick={() => setErrorMessage(null)}
-            style={{ background: "transparent", border: 0, color: "inherit", cursor: "pointer", fontWeight: "700" }}
+            onClick={() => {
+              stopPolling();
+              setActiveRequest(null);
+              setStrategies([]);
+              setSelectedStrategy(null);
+              loadRequests();
+            }}
+            className="sync-button"
+            style={{
+              padding: "6px 12px",
+              background: "rgba(255,255,255,0.03)",
+              borderColor: "var(--border)",
+              fontSize: "12.5px"
+            }}
           >
-            إغلاق
+            <ArrowRight size={14} style={{ marginLeft: "6px" }} />
+            العودة لمكتبة المحتوى
           </button>
+          <div>
+            <h1 style={{ fontSize: "18px", fontWeight: "700" }}>متابعة معالجة الطلب</h1>
+            <span className="ltr-val" style={{ fontSize: "11.5px", color: "var(--muted)" }}>ID: {activeRequest.id}</span>
+          </div>
         </div>
       )}
 
-      {/* Main Grid: Left is Form/Details, Right is Timeline */}
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.85fr) minmax(280px, 0.75fr)", gap: "20px", marginBottom: "24px", alignItems: "start" }}>
-        
-        {/* Left wider column */}
-        <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-          
-          <RequestForm
-            accounts={accounts}
-            onSubmit={handleCreateRequest}
-            isLoading={isSubmitting || isResolving || isGeneratingStrategy}
-          />
+      {/* Global Error Banner */}
+      {errorMessage && (
+        <div className="panel" style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", display: "flex", gap: "10px", color: "var(--red)" }}>
+          <AlertCircle size={20} style={{ flexShrink: 0 }} />
+          <div style={{ flex: 1, fontSize: "13px" }}>
+            {errorMessage}
+          </div>
+          <button onClick={() => setErrorMessage(null)} style={{ background: "transparent", border: 0, color: "inherit", cursor: "pointer", fontSize: "12px", fontWeight: "600" }}>إغلاق</button>
+        </div>
+      )}
 
-          {!activeRequest ? (
-            // Empty State
-            <article className="panel" style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "60px 20px", textAlign: "center", gap: "16px", background: "var(--surface-soft)" }}>
-              <div style={{ width: "80px", height: "80px", borderRadius: "50%", background: "var(--nav-active-bg)", display: "grid", placeItems: "center", color: "var(--nav-active-color)" }}>
-                <BrainCircuit size={42} />
-              </div>
-              <h3 style={{ fontSize: "16px", fontWeight: "600", color: "var(--foreground)" }}>مركز إنشاء الحملات الإعلانية الذكية بالذكاء الاصطناعي</h3>
-              <p style={{ color: "var(--muted)", fontSize: "13px", maxWidth: "420px", margin: 0, lineHeight: "1.6" }}>
-                ابدأ بإنشاء أول حملة إعلانية ذكية. أدخل رابط المنشور وتفاصيل الميزانية والوجهة أعلاه ليقوم الذكاء الاصطناعي بالتحليل وبناء حملة مخصصة.
-              </p>
-            </article>
-          ) : (
-            // Active Request Flow
-            <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <h3 style={{ fontSize: "14px", fontWeight: "600" }}>الطلب النشط حالياً: <span className="ltr-val" style={{ fontSize: "12px", color: "var(--blue)" }}>{activeRequest.id}</span></h3>
-                <div style={{ display: "flex", gap: "8px" }}>
-                  <button onClick={handleRefreshRequestDetails} className="sync-button" style={{ padding: "6px 12px", fontSize: "12px" }}>
-                    <RefreshCw size={12} /> تحديث الحالة
+      {/* 2. Active Request Details Panel (if set) */}
+      {activeRequest ? (
+        <div style={{ display: "grid", gridTemplateColumns: "1.2fr 3fr", gap: "24px", alignItems: "stretch" }}>
+          {/* Sticky Left Sidebar Timeline */}
+          <div>
+            <WorkflowTimeline steps={getTimelineSteps()} />
+            
+            {/* Context/Refresh options */}
+            <div className="panel" style={{ marginTop: "16px", display: "flex", flexDirection: "column", gap: "10px", background: "var(--surface-soft)" }}>
+              <span style={{ fontSize: "12px", color: "var(--muted)", fontWeight: "600" }}>حالة المعالجة الحالية:</span>
+              <strong style={{ fontSize: "13.5px" }}>{activeRequest.status.toUpperCase()}</strong>
+              
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginTop: "4px" }}>
+                <button onClick={handleRefreshRequestDetails} className="sync-button" style={{ fontSize: "11.5px", padding: "4px 10px" }}>
+                  <RefreshCcw size={12} style={{ marginLeft: "4px" }} />
+                  تحديث البيانات
+                </button>
+                
+                {activeRequest.status === "resolution_failed" && (
+                  <button onClick={handleManualResolveRetry} className="sync-button" style={{ borderColor: "var(--red)", color: "var(--red)", fontSize: "11.5px", padding: "4px 10px" }}>
+                    إعادة محاولة التحليل
                   </button>
-                </div>
+                )}
+
+                {activeRequest.status === "draft" && !isGeneratingStrategy && (
+                  <button onClick={handleManualStrategyRetry} className="sync-button" style={{ borderColor: "var(--blue)", color: "var(--blue)", fontSize: "11.5px", padding: "4px 10px" }}>
+                    إعادة توليد الخطة
+                  </button>
+                )}
               </div>
+            </div>
+          </div>
 
-              {/* Step 1: Content Analysis */}
-              {activeRequest.request_payload?.content_analysis && (
-                <ContentAnalysis analysis={activeRequest.request_payload.content_analysis} />
-              )}
+          {/* Right Main Flow Details Area */}
+          <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+            {/* Case A: Resolution Failed */}
+            {activeRequest.status === "resolution_failed" && (
+              <div className="panel" style={{ borderLeft: "4px solid var(--red)" }}>
+                <h3 style={{ color: "var(--red)", fontSize: "15px", fontWeight: "700", marginBottom: "8px" }}>فشل تحليل المنشور المستهدف</h3>
+                <p style={{ fontSize: "13px", lineHeight: "1.6" }}>
+                  حدث خطأ أثناء الاتصال بمحدد المنشورات لحل هذا الرابط.
+                </p>
+                {activeRequest.error_message && (
+                  <pre style={{ background: "rgba(0,0,0,0.2)", padding: "10px", borderRadius: "4px", fontSize: "12px", color: "var(--red)", marginTop: "10px" }}>
+                    {activeRequest.error_message}
+                  </pre>
+                )}
+              </div>
+            )}
 
-              {/* Warning state: integration gap (no strategy rows exist) */}
-              {hasNoStrategies && (
-                <div
+            {/* Case B: Content Analysis block (if available inside payload) */}
+            {activeRequest.request_payload?.content_analysis && (
+              <ContentAnalysis analysis={activeRequest.request_payload.content_analysis} />
+            )}
+
+            {/* Case C: Strategy Node ready but strategy_ready without rows (Gap Warning) */}
+            {activeRequest.status === "strategy_ready" && strategies.length === 0 && (
+              <div className="panel" style={{ border: "1px solid var(--amber)", background: "rgba(245, 158, 11, 0.05)", display: "flex", flexDirection: "column", gap: "10px" }}>
+                <div style={{ display: "flex", gap: "8px", alignItems: "center", color: "var(--amber)" }}>
+                  <AlertTriangle size={18} />
+                  <h3 style={{ fontSize: "14.5px", fontWeight: "700" }}>الاستراتيجيات قيد الحفظ</h3>
+                </div>
+                <p style={{ fontSize: "12.5px", color: "var(--muted)", lineHeight: "1.6" }}>
+                  أشار نظام الذكاء الاصطناعي بأن الخطة جاهزة، ولكن لم تكتمل عملية كتابة الاستراتيجيات إلى قاعدة البيانات بعد. يرجى الضغط على زر التحديث أو الانتظار قليلاً.
+                </p>
+                <button
+                  onClick={handleRefreshRequestDetails}
+                  className="sync-button"
                   style={{
-                    background: "var(--amber-soft)",
-                    border: "1px solid var(--amber)",
-                    borderRadius: "10px",
-                    padding: "16px",
+                    alignSelf: "flex-start",
+                    borderColor: "var(--amber)",
                     color: "var(--amber)",
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: "12px",
+                    fontSize: "12px",
+                    background: "rgba(245, 158, 11, 0.03)"
                   }}
                 >
-                  <div style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13.5px", fontWeight: "600" }}>
-                    <AlertCircle size={18} />
-                    <span>فجوة مزامنة: الاستراتيجية جاهزة ولكن لم يتم العثور على خطط مقترحة في قاعدة البيانات.</span>
-                  </div>
-                  <p style={{ margin: 0, fontSize: "12.5px", color: "var(--muted)", lineHeight: "1.6" }}>
-                    قد يستغرق سير العمل في n8n بضع ثوانٍ إضافية لحفظ الخطط الثلاث (الخيار المحافظ، المتوازن، الهجومي). يرجى النقر على زر إعادة المحاولة للتحديث وجلب الخطط المخصصة.
-                  </p>
-                  <div style={{ display: "flex", gap: "10px" }}>
-                    <button
-                      onClick={handleRefreshRequestDetails}
-                      className="sync-button"
-                      style={{
-                        borderColor: "var(--amber)",
-                        color: "var(--amber)",
-                        background: "transparent",
-                        padding: "6px 14px",
-                        fontSize: "12.5px"
-                      }}
-                    >
-                      <RefreshCw size={14} /> تحديث واستعلام عن الخطط
-                    </button>
-                    <button
-                      onClick={handleManualStrategyRetry}
-                      disabled={isGeneratingStrategy}
-                      className="sync-button"
-                      style={{
-                        borderColor: "var(--amber)",
-                        color: "white",
-                        background: "var(--amber)",
-                        padding: "6px 14px",
-                        fontSize: "12.5px"
-                      }}
-                    >
-                      {isGeneratingStrategy ? "جاري إعادة التوليد..." : "إعادة تشغيل مولد الاستراتيجية"}
-                    </button>
-                  </div>
-                </div>
-              )}
+                  <RefreshCcw size={12} style={{ marginLeft: "4px" }} />
+                  تحديث فوري للاستراتيجيات
+                </button>
+              </div>
+            )}
 
-              {/* Step 2: Strategy Selector */}
-              {isStrategyReady && strategies.length > 0 && (
-                <StrategySelector
-                  strategies={strategies}
-                  selectedTier={selectedStrategy?.tier || null}
-                  onSelectTier={handleSelectTier}
-                  disabled={isSelectingStrategy || isBuilding}
+            {/* Case D: Strategy Selector (show when rows exist) */}
+            {strategies.length > 0 && (
+              <StrategySelector
+                strategies={strategies}
+                selectedTier={selectedStrategy?.tier || null}
+                onSelectTier={handleSelectStrategy}
+                disabled={isSelectingStrategy || ["building", "ready_for_review", "published", "approved"].includes(activeRequest.status)}
+              />
+            )}
+
+            {/* Case E: Preview & Build block */}
+            {selectedStrategy && (
+              <>
+                <CampaignPreview strategy={selectedStrategy} />
+                <BuildSummary
+                  request={activeRequest}
+                  selectedStrategy={selectedStrategy}
+                  onBuild={handleBuildCampaign}
+                  isLoading={isBuilding || activeRequest.status === "building"}
+                  disabled={isBuilding || ["building", "ready_for_review", "published", "approved"].includes(activeRequest.status)}
                 />
-              )}
-
-              {/* Step 3: Preview and Build Summary */}
-              {selectedStrategy && (
-                <div style={{ display: "grid", gridTemplateColumns: "1.1fr 0.9fr", gap: "20px" }}>
-                  <CampaignPreview strategy={selectedStrategy} />
-                  <BuildSummary
-                    request={activeRequest}
-                    selectedStrategy={selectedStrategy}
-                    onBuild={handleBuildCampaign}
-                    isLoading={isBuilding}
-                    disabled={isSelectingStrategy || isBuilding || activeRequest.status === "building" || activeRequest.status === "ready_for_review" || activeRequest.status === "published"}
-                  />
-                </div>
-              )}
-
-              {/* Resolution failed card retry */}
-              {activeRequest.status === "resolution_failed" && (
-                <div className="panel" style={{ border: "1px solid var(--red-soft)", background: "var(--red-soft)", display: "flex", flexDirection: "column", gap: "10px" }}>
-                  <h3 style={{ fontSize: "14px", color: "var(--red)", fontWeight: "600", margin: 0 }}>فشل تحليل المنشور</h3>
-                  <p style={{ fontSize: "12.5px", margin: 0, color: "var(--muted)" }}>
-                    السبب: {activeRequest.error_message || "تعذر العثور على المنشور أو تحليله عبر n8n."}
-                  </p>
-                  <button onClick={handleManualResolveRetry} className="sync-button" style={{ borderColor: "var(--red)", color: "var(--red)", alignSelf: "flex-start", marginTop: "4px" }}>
-                    <RefreshCcw size={12} /> إعادة محاولة التحليل
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
+              </>
+            )}
+          </div>
         </div>
+      ) : (
+        /* 3. Content Library Grid view (Default Layout) */
+        <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+          <ContentLibrary
+            items={contentItems}
+            isLoading={isLoadingContent}
+            onSelectForCampaign={handleSelectForCampaign}
+            onShowDetails={handleShowDetails}
+            onShowAIEditor={handleShowAIEditor}
+            onSyncTrigger={handleContentSync}
+            isSyncing={isSyncingContent}
+            pagination={contentPagination}
+            onPageChange={(newOffset) => setContentPagination((prev) => ({ ...prev, offset: newOffset }))}
+            onSearch={setSearchQuery}
+            onFilterChange={(f) => {
+              setActiveFilters(f);
+              setContentPagination((prev) => ({ ...prev, offset: 0 }));
+            }}
+            onSortChange={(s) => {
+              setSortBy(s);
+              setContentPagination((prev) => ({ ...prev, offset: 0 }));
+            }}
+          />
 
-        {/* Right timeline column */}
-        <div>
-          <WorkflowTimeline steps={steps} />
+          {/* 4. Collapsible Manual URL Resolver fallback */}
+          <div className="panel" style={{ marginTop: "12px", border: "1px solid var(--border)" }}>
+            <button
+              onClick={() => setShowManualFallback(!showManualFallback)}
+              style={{
+                width: "100%",
+                background: "transparent",
+                border: 0,
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                color: "var(--foreground)",
+                fontWeight: "600",
+                fontSize: "14px",
+                cursor: "pointer",
+                padding: "4px 0"
+              }}
+            >
+              <span style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <Link size={16} style={{ color: "var(--blue)" }} />
+                لا تجد المنشور المطلق؟ ألصق الرابط يدوياً كخيار بديل
+              </span>
+              <span style={{ fontSize: "12px", color: "var(--muted)" }}>
+                {showManualFallback ? "إغلاق النموذج ▲" : "عرض النموذج القديم ▼"}
+              </span>
+            </button>
+
+            {showManualFallback && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+                transition={{ duration: 0.2 }}
+                style={{ marginTop: "16px", borderTop: "1px solid var(--border)", paddingTop: "16px" }}
+              >
+                <RequestForm
+                  accounts={accounts}
+                  onSubmit={handleCreateManualRequest}
+                  isLoading={isSubmitting}
+                />
+              </motion.div>
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
-      {/* Recent Requests Table at bottom */}
+      {/* 5. Drawers Area */}
+      {/* Content details Drawer */}
+      <ContentDetails
+        item={selectedItemForDetails}
+        isOpen={isDetailsOpen}
+        onClose={() => {
+          setIsDetailsOpen(false);
+          setSelectedItemForDetails(null);
+        }}
+      />
+
+      {/* AI Editor Drawer */}
+      <ContentAIEditor
+        item={selectedItemForAIEditor}
+        isOpen={isAIEditorOpen}
+        onClose={() => {
+          setIsAIEditorOpen(false);
+          setSelectedItemForAIEditor(null);
+        }}
+      />
+
+      {/* Selected Campaign Config Form Drawer */}
+      <ContentSelectionDrawer
+        item={selectedItemForCampaign}
+        isOpen={isCampaignDrawerOpen}
+        onClose={() => {
+          setIsCampaignDrawerOpen(false);
+          setSelectedItemForCampaign(null);
+        }}
+        accounts={accounts}
+        onSubmit={handleCreateRequestFromLibrary}
+        isLoading={isSubmitting}
+      />
+
+      {/* 6. Recent Requests Table (kept at the bottom) */}
       <RecentRequests
         requests={requests}
-        onSelectRequest={handleSelectPastRequest}
+        onSelectRequest={handleSelectRequestFromTable}
         activeRequestId={activeRequest?.id}
       />
-    </>
+    </div>
   );
 }
