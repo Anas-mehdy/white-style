@@ -2,13 +2,14 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Activity, BrainCircuit, LayoutDashboard, RefreshCw, Settings2, ShieldCheck, Target, Sun, Moon } from "lucide-react";
+import { Activity, BrainCircuit, LayoutDashboard, RefreshCw, Settings2, ShieldCheck, Target, Sun, Moon, Rocket } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { AccountRow, ChartPoint } from "@/lib/dashboard-data";
 import { isDashboardApiResponse, type DashboardApiResponse } from "@/types/dashboard";
 
 const nav = [
   ["/dashboard", "نظرة عامة", LayoutDashboard],
+  ["/create-campaign", "إنشاء الحملات", Rocket],
   ["/accounts", "الحسابات الإعلانية", Target],
   ["/agent-decisions", "قرارات Agent", BrainCircuit],
   ["/execution-log", "سجل التنفيذ", Activity],
