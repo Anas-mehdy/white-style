@@ -1,0 +1,612 @@
+{
+  "name": "WS-02 Existing Post Resolver",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## WS-02 Existing Post Resolver\n\nReceives a `request_id`, loads the draft campaign request, and resolves the existing-post identifiers.\n\n### Supported now\n- Instagram canonical URLs: `instagram.com/p/...`, `instagram.com/reel/...`\n  - Uses Meta Instagram oEmbed to obtain `media_id`\n- Facebook canonical URLs:\n  - `/posts/{post_id}`\n  - `/videos/{video_id}`\n  - `/reel/{reel_id}`\n  - Builds `object_story_id` when possible\n\n### Output\nResolver data is merged into `campaign_creation_requests.request_payload`:\n- `resolver_status`\n- `resolved_at`\n- `source_post_id`\n- `object_story_id`\n- `instagram_media_id`\n- `resolver_method`\n\nThis workflow does not publish or create ads.",
+        "height": 330,
+        "width": 760,
+        "color": 5
+      },
+      "id": "525925c3-c13a-45c6-be42-4b3747848933",
+      "name": "WS-02 Resolver Notes",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1080,
+        -360
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ws-02/resolve-existing-post",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "259d74ad-b1fd-44e9-b9d5-d5df679a4129",
+      "name": "Resolver Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -900,
+        -80
+      ],
+      "webhookId": "3b7a1801-53f4-4431-956b-746896113078"
+    },
+    {
+      "parameters": {},
+      "id": "0f1a9e51-a562-4c12-9ba1-3ec24e059217",
+      "name": "Manual Test",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -900,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { request_id: \"REPLACE_WITH_CAMPAIGN_REQUEST_UUID\" } }];"
+      },
+      "id": "dc29cd63-3510-4abc-b3b9-0fd8c2ff1d20",
+      "name": "Manual Test Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -700,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst input = $json.body ?? $json;\nconst requestId = String(input.request_id ?? '').trim();\nconst uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;\n\nreturn [{\n  json: {\n    ok: uuidPattern.test(requestId),\n    request_id: requestId,\n    error: uuidPattern.test(requestId) ? null : {\n      code: 'INVALID_REQUEST_ID',\n      message: 'request_id يجب أن يكون UUID صالحًا.'\n    }\n  }\n}];\n"
+      },
+      "id": "8ef69329-b7a3-48fc-bf1c-564d63b5917f",
+      "name": "Normalize Resolver Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -500,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "18253ec1-2151-4673-ac79-012942646895",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "14fc2d81-ff3d-4267-9bdc-e91182117dd0",
+      "name": "Valid Request ID?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -280,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://wsmbaueobuzilyagtnuq.supabase.co/rest/v1/campaign_creation_requests?id=eq.' + $json.request_id + '&select=*' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "234ea783-a3bc-4629-ad50-55e8ffc71310",
+      "name": "Load Draft Request",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -40,
+        -80
+      ],
+      "credentials": {
+        "httpCustomAuth": {
+          "id": "0akO77AeyCnD4XDu",
+          "name": "White Style Supabase Service Role"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst rows = Array.isArray($json) ? $json : ($json.data ?? []);\nconst row = Array.isArray(rows) ? rows[0] : null;\n\nif (!row) {\n  return [{ json: { ok: false, http_status: 404, error: {\n    code: 'REQUEST_NOT_FOUND',\n    message: 'لم يتم العثور على طلب الحملة.'\n  }}}];\n}\n\nif (!['draft','pending_resolution','resolution_failed'].includes(row.status)) {\n  return [{ json: { ok: false, http_status: 409, error: {\n    code: 'INVALID_REQUEST_STATUS',\n    message: `لا يمكن حل الطلب عندما تكون حالته ${row.status}.`\n  }, request: row }}];\n}\n\nreturn [{\n  json: {\n    ok: true,\n    http_status: 200,\n    request: row,\n    source_platform: row.source_platform,\n    source_post_url: row.source_post_url\n  }\n}];\n"
+      },
+      "id": "1d457df2-3543-4c4d-9b20-35b0b23d79a4",
+      "name": "Validate Loaded Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        200,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "2b6ab594-da9e-46ea-8f0e-961c14021401",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "646993ff-3206-450a-afed-0377b09a9a80",
+      "name": "Request Can Be Resolved?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        440,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d6bdd9d2-9e9b-440c-952b-80e863c816c5",
+              "leftValue": "={{ $json.source_platform }}",
+              "rightValue": "instagram",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "0e3ef2c8-745b-4d00-ab57-757f883d018a",
+      "name": "Is Instagram?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        680,
+        -160
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://graph.facebook.com/v25.0/instagram_oembed",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "url",
+              "value": "={{ $('Validate Loaded Request').first().json.source_post_url }}"
+            },
+            {
+              "name": "omitscript",
+              "value": "true"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "69e570a7-33fe-4127-ae68-49c5ad7f418f",
+      "name": "Instagram oEmbed Resolve",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        920,
+        -260
+      ],
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "b33D7EUuegL9mKvo",
+          "name": "White Style Meta Marketing API 1264530092507896"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst base = $('Validate Loaded Request').first().json;\nconst response = $json;\nconst mediaId = response.media_id ?? response.id ?? null;\nconst shortcode = (() => {\n  const m = base.source_post_url.match(/instagram\\.com\\/(?:p|reel|reels|tv)\\/([^/?#]+)/i);\n  return m ? m[1] : null;\n})();\n\nif (!mediaId) {\n  return [{\n    json: {\n      ok: false,\n      http_status: 422,\n      request: base.request,\n      resolution: {\n        resolver_status: 'failed',\n        resolver_method: 'instagram_oembed',\n        source_shortcode: shortcode,\n        error_code: 'INSTAGRAM_MEDIA_ID_NOT_RETURNED',\n        error_message: response?.error?.message ?? response?.error?.error?.message ??\n          'Meta oEmbed لم يُرجع Instagram media_id. تحقق من صلاحية الرابط والتوكن ووضع التطبيق.'\n      }\n    }\n  }];\n}\n\nreturn [{\n  json: {\n    ok: true,\n    http_status: 200,\n    request: base.request,\n    resolution: {\n      resolver_status: 'resolved',\n      resolver_method: 'instagram_oembed',\n      source_shortcode: shortcode,\n      source_post_id: String(mediaId),\n      instagram_media_id: String(mediaId),\n      object_story_id: null\n    }\n  }\n}];\n"
+      },
+      "id": "f6a61255-d051-4a41-900c-f2520b39023d",
+      "name": "Normalize Instagram Resolution",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1180,
+        -260
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst base = $('Validate Loaded Request').first().json;\nconst url = base.source_post_url;\nconst PAGE_ID = '1196152526914949';\n\nfunction match(pattern) {\n  const m = url.match(pattern);\n  return m ? m[1] : null;\n}\n\nconst composite = match(/story_fbid=(\\d+).*?[?&]id=(\\d+)/i);\nlet postId =\n  match(/\\/posts\\/(\\d+)/i) ||\n  match(/\\/videos\\/(\\d+)/i) ||\n  match(/\\/reel\\/(\\d+)/i) ||\n  match(/[?&]story_fbid=(\\d+)/i) ||\n  match(/[?&]fbid=(\\d+)/i);\n\nlet objectStoryId = null;\nlet method = null;\n\nif (composite) {\n  objectStoryId = `${PAGE_ID}_${composite}`;\n  method = 'facebook_query_story_fbid';\n} else if (postId) {\n  objectStoryId = postId.includes('_') ? postId : `${PAGE_ID}_${postId}`;\n  method = 'facebook_canonical_url_parser';\n}\n\nif (!postId) {\n  return [{\n    json: {\n      ok: false,\n      http_status: 422,\n      request: base.request,\n      resolution: {\n        resolver_status: 'failed',\n        resolver_method: 'facebook_canonical_url_parser',\n        error_code: 'FACEBOOK_POST_ID_NOT_FOUND',\n        error_message: 'تعذر استخراج رقم المنشور من رابط Facebook. استخدم الرابط الأصلي الذي يحتوي /posts/ أو /videos/ أو /reel/.'\n      }\n    }\n  }];\n}\n\nreturn [{\n  json: {\n    ok: true,\n    http_status: 200,\n    request: base.request,\n    resolution: {\n      resolver_status: 'resolved',\n      resolver_method: method,\n      source_post_id: String(postId),\n      instagram_media_id: null,\n      object_story_id: objectStoryId\n    }\n  }\n}];\n"
+      },
+      "id": "a82cd85a-9ad3-428f-ae61-c03a0f710332",
+      "name": "Resolve Facebook URL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        920,
+        -40
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst item = $json;\nconst previous = item.request?.request_payload ?? {};\nconst resolution = item.resolution ?? {};\nconst now = new Date().toISOString();\n\nreturn [{\n  json: {\n    ok: item.ok,\n    http_status: item.http_status,\n    request_id: item.request?.id,\n    patch: {\n      status: item.ok ? 'draft' : 'resolution_failed',\n      error_code: item.ok ? null : (resolution.error_code ?? 'RESOLUTION_FAILED'),\n      error_message: item.ok ? null : (resolution.error_message ?? 'تعذر حل المنشور.'),\n      request_payload: {\n        ...previous,\n        ...resolution,\n        resolved_at: item.ok ? now : null,\n        resolution_attempted_at: now\n      }\n    },\n    resolution\n  }\n}];\n"
+      },
+      "id": "dff29beb-d02f-4979-b351-3a592d1cbf24",
+      "name": "Build Supabase Patch",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1440,
+        -140
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ 'https://wsmbaueobuzilyagtnuq.supabase.co/rest/v1/campaign_creation_requests?id=eq.' + $json.request_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.patch }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "24182930-a0d0-47ee-a0ac-a03fddc9d5d2",
+      "name": "Patch Campaign Request",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1680,
+        -140
+      ],
+      "credentials": {
+        "httpCustomAuth": {
+          "id": "0akO77AeyCnD4XDu",
+          "name": "White Style Supabase Service Role"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst row = Array.isArray($json) ? $json[0] : $json;\nconst payload = row?.request_payload ?? {};\nconst ok = payload.resolver_status === 'resolved';\n\nreturn [{\n  json: {\n    ok,\n    http_status: ok ? 200 : 422,\n    request_id: row?.id ?? null,\n    status: row?.status ?? null,\n    source_platform: row?.source_platform ?? null,\n    source_post_url: row?.source_post_url ?? null,\n    resolver_status: payload.resolver_status ?? null,\n    resolver_method: payload.resolver_method ?? null,\n    source_post_id: payload.source_post_id ?? null,\n    object_story_id: payload.object_story_id ?? null,\n    instagram_media_id: payload.instagram_media_id ?? null,\n    error_code: row?.error_code ?? null,\n    error_message: row?.error_message ?? null,\n    message: ok\n      ? 'تم حل معرّف المنشور الموجود وحفظه في طلب الحملة.'\n      : 'تم حفظ فشل عملية الحل داخل طلب الحملة.'\n  }\n}];\n"
+      },
+      "id": "3a7be2b9-e8d2-469b-a293-a7a1618e7d02",
+      "name": "Format Resolver Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1920,
+        -140
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": "={{ $json.http_status }}"
+        }
+      },
+      "id": "eb0512f4-0c2b-4b1d-9dc6-0fc157bef473",
+      "name": "Respond Resolver Result",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        2160,
+        -140
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst source = $json;\nreturn [{\n  json: {\n    ok: false,\n    http_status: source.http_status ?? 400,\n    error_code: source.error?.code ?? 'RESOLVER_REQUEST_FAILED',\n    error_message: source.error?.message ?? 'تعذر تنفيذ طلب حل المنشور.'\n  }\n}];\n"
+      },
+      "id": "64f1b280-d9f1-4d09-bba8-365ba7f2f778",
+      "name": "Format Early Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        680,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": "={{ $json.http_status }}"
+        }
+      },
+      "id": "47c26016-5961-42ad-a293-65efe6c383c5",
+      "name": "Respond Early Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        920,
+        160
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Resolver Webhook": {
+      "main": [
+        [
+          {
+            "node": "Normalize Resolver Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Test": {
+      "main": [
+        [
+          {
+            "node": "Manual Test Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Test Request": {
+      "main": [
+        [
+          {
+            "node": "Normalize Resolver Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Resolver Input": {
+      "main": [
+        [
+          {
+            "node": "Valid Request ID?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valid Request ID?": {
+      "main": [
+        [
+          {
+            "node": "Load Draft Request",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Early Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Draft Request": {
+      "main": [
+        [
+          {
+            "node": "Validate Loaded Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Loaded Request": {
+      "main": [
+        [
+          {
+            "node": "Request Can Be Resolved?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Request Can Be Resolved?": {
+      "main": [
+        [
+          {
+            "node": "Is Instagram?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Early Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Instagram?": {
+      "main": [
+        [
+          {
+            "node": "Instagram oEmbed Resolve",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Resolve Facebook URL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Instagram oEmbed Resolve": {
+      "main": [
+        [
+          {
+            "node": "Normalize Instagram Resolution",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Instagram Resolution": {
+      "main": [
+        [
+          {
+            "node": "Build Supabase Patch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve Facebook URL": {
+      "main": [
+        [
+          {
+            "node": "Build Supabase Patch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Supabase Patch": {
+      "main": [
+        [
+          {
+            "node": "Patch Campaign Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Patch Campaign Request": {
+      "main": [
+        [
+          {
+            "node": "Format Resolver Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Resolver Response": {
+      "main": [
+        [
+          {
+            "node": "Respond Resolver Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Early Error": {
+      "main": [
+        [
+          {
+            "node": "Respond Early Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Hebron",
+    "saveManualExecutions": true,
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all"
+  },
+  "versionId": "7683b526-24ef-48ec-981b-f0c98021bfb7",
+  "meta": {
+    "aiBuilderAssisted": true
+  },
+  "tags": []
+}

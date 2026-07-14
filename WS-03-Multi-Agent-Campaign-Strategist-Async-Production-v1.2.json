@@ -1,0 +1,1582 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## WS-03 Multi-Agent Campaign Strategist — Async Production\n\nProduction flow:\n\n1. Validate request.\n2. Prevent duplicate strategy execution.\n3. Mark request as `analyzing`.\n4. Return HTTP `202 Accepted` immediately.\n5. Continue the six AI stages in the background.\n6. Persist exactly three rows in `campaign_strategies`.\n7. Update request to:\n   - `strategy_ready`\n   - `strategy_review_required`\n   - or `failed`\n\nThe browser must poll the campaign request every 3 seconds.\n\nThis workflow never creates or activates Meta campaigns.\nInitial Meta campaign status remains `PAUSED`.\n\n### Fix v1.1\n- Validates that the AI returned exactly one strategy for each tier.\n- Rejects duplicate or missing tiers before Supabase.\n- Sends each strategy UPSERT separately to avoid duplicate-conflict rows in one SQL command.\n\n\n### Fix v1.2\n- Inserts/updates all three strategy rows with `selected=false`.\n- Selects the recommended tier in a separate PATCH statement.\n- Avoids the `enforce_single_selected_campaign_strategy` trigger colliding with a multi-row UPSERT.\n",
+        "height": 420,
+        "width": 820,
+        "color": 5
+      },
+      "id": "1d208b3b-a89e-467f-9bcf-fcade95ce6a2",
+      "name": "WS-03 Notes",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        9264,
+        -208
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ws-03/generate-strategy",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "017ec3d2-b766-40db-96bc-db6fb555e086",
+      "name": "Strategy Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        9456,
+        192
+      ],
+      "webhookId": "f33b0662-4f8c-4e65-ab48-e449e07fc9f6",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "CxiVdIZ9xjapDt87",
+          "name": "ads creation secret"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "0ce8cd81-7def-4f5a-8e8a-6976a376d769",
+      "name": "Manual Test",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        9456,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { request_id: \"REPLACE_WITH_RESOLVED_REQUEST_UUID\" } }];"
+      },
+      "id": "13c08efb-7994-4633-bf2c-b5701f75dddd",
+      "name": "Manual Test Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        9664,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst input = $json.body ?? $json;\nconst requestId = String(input.request_id ?? '').trim();\nconst valid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId);\nreturn [{json:{\n  ok: valid,\n  request_id: requestId,\n  error: valid ? null : {code:'INVALID_REQUEST_ID',message:'request_id غير صالح.'}\n}}];\n"
+      },
+      "id": "78d8a7cc-7ec6-4088-8906-5ea5923d5907",
+      "name": "Normalize Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        9888,
+        336
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "4a45e5d7-b60f-4f79-92e9-70c57306f6cc",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "aa75bbdb-6d91-454d-99e2-b4a920c68359",
+      "name": "Valid ID?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        10112,
+        336
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://wsmbaueobuzilyagtnuq.supabase.co/rest/v1/campaign_creation_requests?id=eq.' + $json.request_id + '&select=*' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "0d5b02ea-3656-4b98-ad0b-c8f0115a74e3",
+      "name": "Load Campaign Request",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        10352,
+        224
+      ],
+      "credentials": {
+        "httpCustomAuth": {
+          "id": "0akO77AeyCnD4XDu",
+          "name": "White Style Supabase Service Role"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const payload = $json;\n\nlet row = null;\n\nif (Array.isArray(payload)) {\n  row = payload[0] ?? null;\n} else if (Array.isArray(payload?.data)) {\n  row = payload.data[0] ?? null;\n} else if (payload && typeof payload === 'object' && payload.id) {\n  row = payload;\n}\n\nif (!row) {\n  return [{\n    json: {\n      ok: false,\n      http_status: 404,\n      error: {\n        code: 'REQUEST_NOT_FOUND',\n        message: 'طلب الحملة غير موجود.'\n      }\n    }\n  }];\n}\n\nconst resolverStatus = row.request_payload?.resolver_status;\n\nif (resolverStatus !== 'resolved') {\n  return [{\n    json: {\n      ok: false,\n      http_status: 409,\n      error: {\n        code: 'POST_NOT_RESOLVED',\n        message: 'يجب حل معرّف المنشور الموجود قبل توليد الاستراتيجية.'\n      },\n      request: row\n    }\n  }];\n}\n\nreturn [{\n  json: {\n    ok: true,\n    http_status: 200,\n    request: row\n  }\n}];"
+      },
+      "id": "4ab8cd4f-42fb-4903-84fb-2f601cb1b9af",
+      "name": "Validate Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        10592,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d870c8e4-98c8-44fd-8a86-8316e1ed44b5",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "07874e5c-7082-4f35-a68b-0f7b21710b5b",
+      "name": "Request Ready?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        10832,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://wsmbaueobuzilyagtnuq.supabase.co/rest/v1/ad_insights_daily?ad_account_id=eq.' + $('Validate Request').first().json.request.target_ad_account_id + '&insight_date=gte.' + $now.minus({days:90}).toISODate() + '&select=insight_date,spend,impressions,reach,frequency,clicks,messaging_conversations,cost_per_conversation,ctr,cpc,cpm&order=insight_date.desc&limit=5000' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "a24b4838-0ab7-41b0-bf12-1dcb45f8bc35",
+      "name": "Load 90-Day Insights",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        11312,
+        144
+      ],
+      "credentials": {
+        "httpCustomAuth": {
+          "id": "0akO77AeyCnD4XDu",
+          "name": "White Style Supabase Service Role"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const payload = $json;\n\nlet rows = [];\n\nif (Array.isArray(payload)) {\n  rows = payload;\n} else if (Array.isArray(payload?.data)) {\n  rows = payload.data;\n} else if (payload && typeof payload === 'object' && payload.insight_date) {\n  rows = [payload];\n}\n\nconst num = v => Number(v ?? 0);\nconst sum = key => rows.reduce((a, r) => a + num(r[key]), 0);\n\nconst weightedAvg = (key, weightKey) => {\n  const totalW = rows.reduce((a, r) => a + num(r[weightKey]), 0);\n  if (!totalW) return 0;\n\n  return rows.reduce(\n    (a, r) => a + (num(r[key]) * num(r[weightKey])),\n    0\n  ) / totalW;\n};\n\nconst spend = sum('spend');\nconst conversations = sum('messaging_conversations');\nconst impressions = sum('impressions');\nconst clicks = sum('clicks');\n\nreturn [{\n  json: {\n    period_days: 90,\n    rows_count: rows.length,\n    spend: Number(spend.toFixed(2)),\n    conversations,\n    impressions,\n    clicks,\n    avg_cost_per_conversation:\n      conversations\n        ? Number((spend / conversations).toFixed(4))\n        : null,\n    ctr:\n      impressions\n        ? Number(((clicks / impressions) * 100).toFixed(4))\n        : 0,\n    avg_frequency:\n      Number(weightedAvg('frequency', 'impressions').toFixed(4)),\n    avg_cpm:\n      impressions\n        ? Number(((spend / impressions) * 1000).toFixed(4))\n        : null,\n    avg_cpc:\n      clicks\n        ? Number((spend / clicks).toFixed(4))\n        : null\n  }\n}];"
+      },
+      "id": "c0519514-9c71-4f5a-8999-5532736d82cc",
+      "name": "Aggregate Performance",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        11552,
+        144
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const req = $('Validate Request').first().json.request;\nconst perf = $json;\nconst payload = req.request_payload ?? {};\nconst providedContent = payload.content_context ?? {};\n\nlet selectedContent = null;\n\ntry {\n  const loadedItems = $('Load Selected Content').all();\n\n  for (const item of loadedItems) {\n    const value = item.json;\n\n    if (Array.isArray(value) && value.length) {\n      selectedContent = value[0];\n      break;\n    }\n\n    if (Array.isArray(value?.data) && value.data.length) {\n      selectedContent = value.data[0];\n      break;\n    }\n\n    if (value && typeof value === 'object' && value.id) {\n      selectedContent = value;\n      break;\n    }\n  }\n} catch {}\n\nconst content = {\n  caption: selectedContent?.caption ?? providedContent.caption ?? null,\n  description: providedContent.description ?? null,\n  media_type:\n    selectedContent?.content_type ??\n    selectedContent?.media_type ??\n    providedContent.media_type ??\n    payload.detected_content_type ??\n    null,\n  product_name: providedContent.product_name ?? null,\n  offer: providedContent.offer ?? null,\n  visual_summary: providedContent.visual_summary ?? null,\n  thumbnail_url:\n    selectedContent?.thumbnail_url ??\n    providedContent.thumbnail_url ??\n    null,\n  media_url: selectedContent?.media_url ?? providedContent.media_url ?? null,\n  permalink:\n    selectedContent?.permalink ??\n    providedContent.permalink ??\n    req.source_post_url ??\n    null,\n  likes_count: Number(\n    selectedContent?.likes_count ??\n    providedContent.likes_count ??\n    0\n  ),\n  comments_count: Number(\n    selectedContent?.comments_count ??\n    providedContent.comments_count ??\n    0\n  ),\n  shares_count: Number(\n    selectedContent?.shares_count ??\n    providedContent.shares_count ??\n    0\n  ),\n  evidence_level:\n    selectedContent || Object.keys(providedContent).length\n      ? 'provided'\n      : 'limited'\n};\n\nreturn [{\n  json: {\n    request_id: req.id,\n    business: {\n      name: 'White Style',\n      niche: 'Fashion and apparel retail',\n      market: 'Palestine',\n      currency: 'USD',\n      primary_destination: req.destination_type,\n      min_daily_budget: 5,\n      max_daily_budget: 25\n    },\n    campaign_request: {\n      target_ad_account_id: req.target_ad_account_id,\n      target_meta_account_id: req.target_meta_account_id,\n      source_platform: req.source_platform,\n      source_post_url: req.source_post_url,\n      requested_daily_budget: req.requested_daily_budget,\n      execution_mode: req.execution_mode,\n      resolved_identifiers: {\n        source_post_id:\n          payload.source_post_id ??\n          selectedContent?.meta_post_id ??\n          null,\n        object_story_id: payload.object_story_id ?? null,\n        instagram_media_id:\n          payload.instagram_media_id ??\n          selectedContent?.instagram_media_id ??\n          null\n      }\n    },\n    selected_content: {\n      content_library_id:\n        selectedContent?.id ??\n        payload.content_library_id ??\n        null,\n      platform:\n        selectedContent?.platform ??\n        req.source_platform,\n      content_type:\n        selectedContent?.content_type ??\n        payload.detected_content_type ??\n        null,\n      meta_post_id:\n        selectedContent?.meta_post_id ??\n        payload.source_post_id ??\n        null,\n      instagram_media_id:\n        selectedContent?.instagram_media_id ??\n        payload.instagram_media_id ??\n        null,\n      page_id:\n        selectedContent?.page_id ??\n        payload.page_id ??\n        null,\n      permalink:\n        selectedContent?.permalink ??\n        req.source_post_url,\n      caption:\n        selectedContent?.caption ??\n        providedContent.caption ??\n        null,\n      thumbnail_url:\n        selectedContent?.thumbnail_url ??\n        providedContent.thumbnail_url ??\n        null,\n      media_url:\n        selectedContent?.media_url ??\n        providedContent.media_url ??\n        null,\n      engagement: {\n        likes: Number(\n          selectedContent?.likes_count ??\n          providedContent.likes_count ??\n          0\n        ),\n        comments: Number(\n          selectedContent?.comments_count ??\n          providedContent.comments_count ??\n          0\n        ),\n        shares: Number(\n          selectedContent?.shares_count ??\n          providedContent.shares_count ??\n          0\n        )\n      }\n    },\n    content_evidence: content,\n    historical_performance: perf,\n    hard_rules: {\n      daily_budget_min: 5,\n      daily_budget_max: 25,\n      total_agent_daily_budget_max: 400,\n      allowed_execution_modes: ['dry_run', 'review', 'live'],\n      initial_campaign_status: 'PAUSED',\n      never_invent_post_content: true\n    }\n  }\n}];"
+      },
+      "id": "e0a094fa-538b-4c1f-8183-14fb946302ff",
+      "name": "Build Agent Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        11792,
+        144
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/responses",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({\n  model: \"gpt-4.1\",\n  instructions: \"Analyze only the supplied content evidence. Never infer unseen products, offers, visuals, or claims. If evidence is limited, reduce confidence and explicitly state risks. Return JSON only.\",\n  input: JSON.stringify($('Build Agent Context').first().json),\n  temperature: 0.2,\n  text: {\n    format: {\n      type: \"json_schema\",\n      name: \"content_analysis\",\n      strict: true,\n      schema: {\n        type: \"object\",\n        additionalProperties: false,\n        properties: {\n          evidence_level: {\n            type: \"string\",\n            enum: [\"provided\", \"limited\"]\n          },\n          content_type: {\n            type: \"string\"\n          },\n          product_category: {\n            type: [\"string\", \"null\"]\n          },\n          offer: {\n            type: [\"string\", \"null\"]\n          },\n          hook_score: {\n            type: \"number\",\n            minimum: 0,\n            maximum: 10\n          },\n          cta_score: {\n            type: \"number\",\n            minimum: 0,\n            maximum: 10\n          },\n          recommended_goal: {\n            type: \"string\",\n            enum: [\"MESSAGES\", \"ENGAGEMENT\", \"TRAFFIC\", \"SALES\"]\n          },\n          content_strengths: {\n            type: \"array\",\n            items: {\n              type: \"string\"\n            }\n          },\n          content_risks: {\n            type: \"array\",\n            items: {\n              type: \"string\"\n            }\n          },\n          confidence: {\n            type: \"number\",\n            minimum: 0,\n            maximum: 1\n          }\n        },\n        required: [\n          \"evidence_level\",\n          \"content_type\",\n          \"product_category\",\n          \"offer\",\n          \"hook_score\",\n          \"cta_score\",\n          \"recommended_goal\",\n          \"content_strengths\",\n          \"content_risks\",\n          \"confidence\"\n        ]\n      }\n    }\n  }\n}) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 120000
+        }
+      },
+      "id": "12a0378b-21d3-46f4-bcbb-6ab9781ca6e0",
+      "name": "AI - Content Analyst",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        12048,
+        -48
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "wKhpf0p1xu7ZFK9G",
+          "name": "OpenAI account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $json;\n\nif (response?.error) {\n  const errorMessage =\n    response.error?.message ??\n    response.error?.error?.message ??\n    JSON.stringify(response.error);\n\n  throw new Error(\n    `Content Analyst API failed: ${errorMessage}`\n  );\n}\n\nfunction extractText(value) {\n  if (typeof value?.output_text === 'string') {\n    return value.output_text;\n  }\n\n  for (const output of value?.output ?? []) {\n    for (const content of output?.content ?? []) {\n      if (typeof content?.text === 'string') {\n        return content.text;\n      }\n\n      if (content?.type === 'output_text' && typeof content?.text === 'string') {\n        return content.text;\n      }\n    }\n  }\n\n  return null;\n}\n\nconst text = extractText(response);\n\nif (!text) {\n  throw new Error(\n    `Content Analyst returned no structured output. Response: ${JSON.stringify(response).slice(0, 1000)}`\n  );\n}\n\nlet parsed;\n\ntry {\n  parsed = JSON.parse(text);\n} catch {\n  throw new Error(\n    `Content Analyst returned invalid JSON: ${text.slice(0, 1000)}`\n  );\n}\n\nreturn [{ json: parsed }];"
+      },
+      "id": "0ccbda50-a09f-40df-a666-6fa4c6f0cc81",
+      "name": "Parse Content Analysis",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        12288,
+        -48
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/responses",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({\n  model: \"gpt-4.1\",\n\n  instructions: [\n    \"You are the Historical Performance Analyst for White Style.\",\n    \"Analyze the supplied advertising account metrics conservatively.\",\n    \"Do not invent ROAS, purchases, revenue, conversion value, audience demographics, or attribution data.\",\n    \"Treat missing or zero metrics as unavailable evidence, not proof of poor performance.\",\n    \"Use only the supplied historical_performance and content analysis.\",\n    \"Return JSON matching the provided schema only.\"\n  ].join(\" \"),\n\n  input: JSON.stringify({\n    context: $('Build Agent Context').first().json,\n    content_analysis: $('Parse Content Analysis').first().json\n  }),\n\n  temperature: 0.2,\n\n  text: {\n    format: {\n      type: \"json_schema\",\n      name: \"historical_analysis\",\n      strict: true,\n      schema: {\n        type: \"object\",\n        additionalProperties: false,\n        properties: {\n          data_quality: {\n            type: \"string\",\n            enum: [\"strong\", \"moderate\", \"weak\", \"none\"]\n          },\n          baseline_cost_per_conversation: {\n            type: [\"number\", \"null\"]\n          },\n          baseline_ctr: {\n            type: [\"number\", \"null\"]\n          },\n          baseline_frequency: {\n            type: [\"number\", \"null\"]\n          },\n          performance_summary: {\n            type: \"string\"\n          },\n          budget_implication: {\n            type: \"string\"\n          },\n          risks: {\n            type: \"array\",\n            items: {\n              type: \"string\"\n            }\n          },\n          confidence: {\n            type: \"number\",\n            minimum: 0,\n            maximum: 1\n          }\n        },\n        required: [\n          \"data_quality\",\n          \"baseline_cost_per_conversation\",\n          \"baseline_ctr\",\n          \"baseline_frequency\",\n          \"performance_summary\",\n          \"budget_implication\",\n          \"risks\",\n          \"confidence\"\n        ]\n      }\n    }\n  }\n}) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 120000
+        }
+      },
+      "id": "3059ac59-f169-49d1-a5bc-a4f2b7eee298",
+      "name": "AI - Historical Analyst",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        12528,
+        -48
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "wKhpf0p1xu7ZFK9G",
+          "name": "OpenAI account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst response = $json;\nfunction extract(r) {\n  if (typeof r.output_text === 'string') return r.output_text;\n  for (const out of (r.output ?? [])) {\n    for (const c of (out.content ?? [])) {\n      if (typeof c.text === 'string') return c.text;\n    }\n  }\n  return null;\n}\nconst text = extract(response);\nif (!text) throw new Error('Historical Analyst returned no structured output');\nlet parsed;\ntry { parsed = JSON.parse(text); }\ncatch (e) { throw new Error('Historical Analyst returned invalid JSON: ' + text.slice(0,300)); }\nreturn [{json:parsed}];\n"
+      },
+      "id": "958b0e4a-954c-4f29-bed6-3419e3887035",
+      "name": "Parse Historical Analysis",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        12768,
+        -48
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/responses",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({\n  model: \"gpt-4.1\",\n\n  instructions: [\n    \"You are the Audience Planner for White Style, a fashion and apparel retailer serving Palestine.\",\n    \"Create a practical audience plan based only on the supplied campaign context, content analysis, and historical analysis.\",\n    \"Prefer broad or Advantage+ audience targeting unless strong supplied evidence justifies narrower targeting.\",\n    \"Never claim demographic certainty from caption text or unseen visual details.\",\n    \"Keep age values between 18 and 65.\",\n    \"Use PS as the primary country code unless the supplied context explicitly requires another market.\",\n    \"Placements must only use values supported by the schema.\",\n    \"Return JSON matching the provided schema only.\"\n  ].join(\" \"),\n\n  input: JSON.stringify({\n    context: $('Build Agent Context').first().json,\n    content: $('Parse Content Analysis').first().json,\n    history: $('Parse Historical Analysis').first().json\n  }),\n\n  temperature: 0.2,\n\n  text: {\n    format: {\n      type: \"json_schema\",\n      name: \"audience_plan\",\n      strict: true,\n      schema: {\n        type: \"object\",\n        additionalProperties: false,\n        properties: {\n          country_codes: {\n            type: \"array\",\n            minItems: 1,\n            items: {\n              type: \"string\"\n            }\n          },\n          age_min: {\n            type: \"integer\",\n            minimum: 18,\n            maximum: 65\n          },\n          age_max: {\n            type: \"integer\",\n            minimum: 18,\n            maximum: 65\n          },\n          gender: {\n            type: \"string\",\n            enum: [\"all\", \"female\", \"male\"]\n          },\n          targeting_mode: {\n            type: \"string\",\n            enum: [\n              \"broad\",\n              \"advantage_plus_audience\",\n              \"interest_assisted\"\n            ]\n          },\n          interest_hints: {\n            type: \"array\",\n            items: {\n              type: \"string\"\n            }\n          },\n          placements: {\n            type: \"array\",\n            minItems: 1,\n            items: {\n              type: \"string\",\n              enum: [\n                \"facebook_feed\",\n                \"facebook_reels\",\n                \"facebook_stories\",\n                \"instagram_feed\",\n                \"instagram_reels\",\n                \"instagram_stories\"\n              ]\n            }\n          },\n          rationale: {\n            type: \"array\",\n            items: {\n              type: \"string\"\n            }\n          },\n          confidence: {\n            type: \"number\",\n            minimum: 0,\n            maximum: 1\n          }\n        },\n        required: [\n          \"country_codes\",\n          \"age_min\",\n          \"age_max\",\n          \"gender\",\n          \"targeting_mode\",\n          \"interest_hints\",\n          \"placements\",\n          \"rationale\",\n          \"confidence\"\n        ]\n      }\n    }\n  }\n}) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 120000
+        }
+      },
+      "id": "ab2d90dd-2a57-42b4-9e81-f87129efc013",
+      "name": "AI - Audience Planner",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        13008,
+        -48
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "wKhpf0p1xu7ZFK9G",
+          "name": "OpenAI account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst response = $json;\nfunction extract(r) {\n  if (typeof r.output_text === 'string') return r.output_text;\n  for (const out of (r.output ?? [])) {\n    for (const c of (out.content ?? [])) {\n      if (typeof c.text === 'string') return c.text;\n    }\n  }\n  return null;\n}\nconst text = extract(response);\nif (!text) throw new Error('Audience Planner returned no structured output');\nlet parsed;\ntry { parsed = JSON.parse(text); }\ncatch (e) { throw new Error('Audience Planner returned invalid JSON: ' + text.slice(0,300)); }\nreturn [{json:parsed}];\n"
+      },
+      "id": "4e29f4d9-03bf-4ad0-aac4-6f7fa848fd7f",
+      "name": "Parse Audience Plan",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        13248,
+        -48
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/responses",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({\n  model: \"gpt-4.1\",\n\n  instructions: [\n    \"You are the Budget Planner for White Style.\",\n    \"Produce three distinct daily budgets for conservative, balanced, and aggressive strategies.\",\n    \"Every daily budget must be between 5 and 25 USD.\",\n    \"The values should normally increase in this order: conservative <= balanced <= aggressive.\",\n    \"Respect requested_daily_budget when provided, but never violate the 5-25 USD guardrail.\",\n    \"Base recommendations on historical messaging cost when reliable.\",\n    \"When historical evidence is weak or unavailable, remain conservative.\",\n    \"Do not invent revenue, purchases, ROAS, or conversion value.\",\n    \"Return JSON matching the provided schema only.\"\n  ].join(\" \"),\n\n  input: JSON.stringify({\n    context: $('Build Agent Context').first().json,\n    content: $('Parse Content Analysis').first().json,\n    history: $('Parse Historical Analysis').first().json,\n    audience: $('Parse Audience Plan').first().json\n  }),\n\n  temperature: 0.2,\n\n  text: {\n    format: {\n      type: \"json_schema\",\n      name: \"budget_plan\",\n      strict: true,\n      schema: {\n        type: \"object\",\n        additionalProperties: false,\n        properties: {\n          conservative_budget: {\n            type: \"number\",\n            minimum: 5,\n            maximum: 25\n          },\n          balanced_budget: {\n            type: \"number\",\n            minimum: 5,\n            maximum: 25\n          },\n          aggressive_budget: {\n            type: \"number\",\n            minimum: 5,\n            maximum: 25\n          },\n          recommended_duration_days: {\n            type: \"integer\",\n            minimum: 3,\n            maximum: 14\n          },\n          budget_basis: {\n            type: \"array\",\n            items: {\n              type: \"string\"\n            }\n          },\n          guardrail_notes: {\n            type: \"array\",\n            items: {\n              type: \"string\"\n            }\n          },\n          confidence: {\n            type: \"number\",\n            minimum: 0,\n            maximum: 1\n          }\n        },\n        required: [\n          \"conservative_budget\",\n          \"balanced_budget\",\n          \"aggressive_budget\",\n          \"recommended_duration_days\",\n          \"budget_basis\",\n          \"guardrail_notes\",\n          \"confidence\"\n        ]\n      }\n    }\n  }\n}) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 120000
+        }
+      },
+      "id": "25378530-9e7c-4153-8eb8-17933ccc5050",
+      "name": "AI - Budget Planner",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        13488,
+        -48
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "wKhpf0p1xu7ZFK9G",
+          "name": "OpenAI account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst response = $json;\nfunction extract(r) {\n  if (typeof r.output_text === 'string') return r.output_text;\n  for (const out of (r.output ?? [])) {\n    for (const c of (out.content ?? [])) {\n      if (typeof c.text === 'string') return c.text;\n    }\n  }\n  return null;\n}\nconst text = extract(response);\nif (!text) throw new Error('Budget Planner returned no structured output');\nlet parsed;\ntry { parsed = JSON.parse(text); }\ncatch (e) { throw new Error('Budget Planner returned invalid JSON: ' + text.slice(0,300)); }\nreturn [{json:parsed}];\n"
+      },
+      "id": "48937b2a-6ba9-4ec8-aba2-1b8ca531fe57",
+      "name": "Parse Budget Plan",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        13728,
+        -48
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/responses",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({\n  model: \"gpt-4.1\",\n\n  instructions: [\n    \"You are the final Campaign Strategy Builder for White Style.\",\n    \"Combine the specialist outputs into exactly three executable strategies.\",\n    \"The three tiers must appear exactly once each: conservative, balanced, aggressive.\",\n    \"For WhatsApp messaging campaigns use objective OUTCOME_ENGAGEMENT, optimization goal CONVERSATIONS, billing event IMPRESSIONS, bid strategy LOWEST_COST_WITHOUT_CAP, and destination WHATSAPP.\",\n    \"Use only supported values from the schema.\",\n    \"Do not create, publish, or activate a campaign.\",\n    \"The future Meta campaign must initially be PAUSED.\",\n    \"Do not invent content, offers, performance, or demographic evidence.\",\n    \"Every daily budget must stay between 5 and 25 USD.\",\n    \"Every age must stay between 18 and 65, and age_max must be greater than or equal to age_min.\",\n    \"Return JSON matching the provided schema only.\"\n  ].join(\" \"),\n\n  input: JSON.stringify({\n    context: $('Build Agent Context').first().json,\n    content: $('Parse Content Analysis').first().json,\n    history: $('Parse Historical Analysis').first().json,\n    audience: $('Parse Audience Plan').first().json,\n    budget: $('Parse Budget Plan').first().json\n  }),\n\n  temperature: 0.2,\n\n  text: {\n    format: {\n      type: \"json_schema\",\n      name: \"campaign_strategy\",\n      strict: true,\n      schema: {\n        type: \"object\",\n        additionalProperties: false,\n        properties: {\n          campaign_name: {\n            type: \"string\"\n          },\n          objective: {\n            type: \"string\",\n            enum: [\n              \"OUTCOME_ENGAGEMENT\",\n              \"OUTCOME_TRAFFIC\",\n              \"OUTCOME_SALES\"\n            ]\n          },\n          optimization_goal: {\n            type: \"string\",\n            enum: [\n              \"CONVERSATIONS\",\n              \"POST_ENGAGEMENT\",\n              \"LINK_CLICKS\",\n              \"LANDING_PAGE_VIEWS\"\n            ]\n          },\n          billing_event: {\n            type: \"string\",\n            enum: [\"IMPRESSIONS\"]\n          },\n          bid_strategy: {\n            type: \"string\",\n            enum: [\"LOWEST_COST_WITHOUT_CAP\"]\n          },\n          destination_type: {\n            type: \"string\",\n            enum: [\n              \"WHATSAPP\",\n              \"MESSENGER\",\n              \"WEBSITE\",\n              \"UNDEFINED\"\n            ]\n          },\n          strategies: {\n            type: \"array\",\n            minItems: 3,\n            maxItems: 3,\n            items: {\n              type: \"object\",\n              additionalProperties: false,\n              properties: {\n                tier: {\n                  type: \"string\",\n                  enum: [\n                    \"conservative\",\n                    \"balanced\",\n                    \"aggressive\"\n                  ]\n                },\n                daily_budget: {\n                  type: \"number\",\n                  minimum: 5,\n                  maximum: 25\n                },\n                duration_days: {\n                  type: \"integer\",\n                  minimum: 3,\n                  maximum: 14\n                },\n                age_min: {\n                  type: \"integer\",\n                  minimum: 18,\n                  maximum: 65\n                },\n                age_max: {\n                  type: \"integer\",\n                  minimum: 18,\n                  maximum: 65\n                },\n                gender: {\n                  type: \"string\",\n                  enum: [\"all\", \"female\", \"male\"]\n                },\n                country_codes: {\n                  type: \"array\",\n                  minItems: 1,\n                  items: {\n                    type: \"string\"\n                  }\n                },\n                placements: {\n                  type: \"array\",\n                  minItems: 1,\n                  items: {\n                    type: \"string\",\n                    enum: [\n                      \"facebook_feed\",\n                      \"facebook_reels\",\n                      \"facebook_stories\",\n                      \"instagram_feed\",\n                      \"instagram_reels\",\n                      \"instagram_stories\"\n                    ]\n                  }\n                },\n                targeting_mode: {\n                  type: \"string\",\n                  enum: [\n                    \"broad\",\n                    \"advantage_plus_audience\",\n                    \"interest_assisted\"\n                  ]\n                },\n                interest_hints: {\n                  type: \"array\",\n                  items: {\n                    type: \"string\"\n                  }\n                },\n                confidence: {\n                  type: \"number\",\n                  minimum: 0,\n                  maximum: 1\n                },\n                reasons: {\n                  type: \"array\",\n                  items: {\n                    type: \"string\"\n                  }\n                }\n              },\n              required: [\n                \"tier\",\n                \"daily_budget\",\n                \"duration_days\",\n                \"age_min\",\n                \"age_max\",\n                \"gender\",\n                \"country_codes\",\n                \"placements\",\n                \"targeting_mode\",\n                \"interest_hints\",\n                \"confidence\",\n                \"reasons\"\n              ]\n            }\n          },\n          recommended_tier: {\n            type: \"string\",\n            enum: [\n              \"conservative\",\n              \"balanced\",\n              \"aggressive\"\n            ]\n          },\n          content_analysis_summary: {\n            type: \"string\"\n          },\n          historical_analysis_summary: {\n            type: \"string\"\n          }\n        },\n        required: [\n          \"campaign_name\",\n          \"objective\",\n          \"optimization_goal\",\n          \"billing_event\",\n          \"bid_strategy\",\n          \"destination_type\",\n          \"strategies\",\n          \"recommended_tier\",\n          \"content_analysis_summary\",\n          \"historical_analysis_summary\"\n        ]\n      }\n    }\n  }\n}) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 120000
+        }
+      },
+      "id": "49085f0d-4d75-4348-b812-c7f3972c352b",
+      "name": "AI - Strategy Builder",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        13968,
+        -48
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "wKhpf0p1xu7ZFK9G",
+          "name": "OpenAI account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst response = $json;\nfunction extract(r) {\n  if (typeof r.output_text === 'string') return r.output_text;\n  for (const out of (r.output ?? [])) {\n    for (const c of (out.content ?? [])) {\n      if (typeof c.text === 'string') return c.text;\n    }\n  }\n  return null;\n}\nconst text = extract(response);\nif (!text) throw new Error('Strategy Builder returned no structured output');\nlet parsed;\ntry { parsed = JSON.parse(text); }\ncatch (e) { throw new Error('Strategy Builder returned invalid JSON: ' + text.slice(0,300)); }\nreturn [{json:parsed}];\n"
+      },
+      "id": "667d9086-41b8-4963-a102-2b9ec0cd41b9",
+      "name": "Parse Campaign Strategy",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        14208,
+        -48
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/responses",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({\n  model: \"gpt-4.1\",\n\n  instructions: [\n    \"You are the final Safety Reviewer for White Style campaign strategies.\",\n    \"Audit the proposal against every supplied hard rule.\",\n    \"Reject the proposal if any daily budget is below 5 or above 25 USD.\",\n    \"Reject the proposal if age_min is below 18, age_max exceeds 65, or age_max is below age_min.\",\n    \"Reject the proposal if the existing post identifier required for the selected platform is missing.\",\n    \"Reject invented product, offer, performance, audience, or visual claims.\",\n    \"Reject unsupported destination, objective, optimization goal, or placement combinations.\",\n    \"Confirm that exactly three tiers exist: conservative, balanced, and aggressive.\",\n    \"The initial Meta campaign status must remain PAUSED.\",\n    \"Warnings that do not prevent safe campaign creation should not automatically cause rejection.\",\n    \"Return JSON matching the provided schema only.\"\n  ].join(\" \"),\n\n  input: JSON.stringify({\n    context: $('Build Agent Context').first().json,\n    proposal: $('Parse Campaign Strategy').first().json\n  }),\n\n  temperature: 0.2,\n\n  text: {\n    format: {\n      type: \"json_schema\",\n      name: \"safety_review\",\n      strict: true,\n      schema: {\n        type: \"object\",\n        additionalProperties: false,\n        properties: {\n          approved: {\n            type: \"boolean\"\n          },\n          recommended_tier: {\n            type: \"string\",\n            enum: [\n              \"conservative\",\n              \"balanced\",\n              \"aggressive\"\n            ]\n          },\n          violations: {\n            type: \"array\",\n            items: {\n              type: \"string\"\n            }\n          },\n          warnings: {\n            type: \"array\",\n            items: {\n              type: \"string\"\n            }\n          },\n          required_human_checks: {\n            type: \"array\",\n            items: {\n              type: \"string\"\n            }\n          },\n          final_strategy: {\n            type: \"object\",\n            additionalProperties: false,\n            properties: {\n              approved_tier: {\n                type: \"string\",\n                enum: [\n                  \"conservative\",\n                  \"balanced\",\n                  \"aggressive\"\n                ]\n              },\n              initial_meta_status: {\n                type: \"string\",\n                enum: [\"PAUSED\"]\n              },\n              safe_to_build: {\n                type: \"boolean\"\n              },\n              review_summary: {\n                type: \"string\"\n              }\n            },\n            required: [\n              \"approved_tier\",\n              \"initial_meta_status\",\n              \"safe_to_build\",\n              \"review_summary\"\n            ]\n          }\n        },\n        required: [\n          \"approved\",\n          \"recommended_tier\",\n          \"violations\",\n          \"warnings\",\n          \"required_human_checks\",\n          \"final_strategy\"\n        ]\n      }\n    }\n  }\n}) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 120000
+        }
+      },
+      "id": "f3a7537e-68f2-4305-ac6f-4f088ef02f32",
+      "name": "AI - Safety Reviewer",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        14448,
+        -48
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "wKhpf0p1xu7ZFK9G",
+          "name": "OpenAI account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst response = $json;\nfunction extract(r) {\n  if (typeof r.output_text === 'string') return r.output_text;\n  for (const out of (r.output ?? [])) {\n    for (const c of (out.content ?? [])) {\n      if (typeof c.text === 'string') return c.text;\n    }\n  }\n  return null;\n}\nconst text = extract(response);\nif (!text) throw new Error('Safety Reviewer returned no structured output');\nlet parsed;\ntry { parsed = JSON.parse(text); }\ncatch (e) { throw new Error('Safety Reviewer returned invalid JSON: ' + text.slice(0,300)); }\nreturn [{json:parsed}];\n"
+      },
+      "id": "a29f6977-05d6-4ced-8743-3abca10705e5",
+      "name": "Parse Safety Review",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        14688,
+        -48
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst request = $('Validate Request').first().json.request;\nconst content = $('Parse Content Analysis').first().json;\nconst history = $('Parse Historical Analysis').first().json;\nconst audience = $('Parse Audience Plan').first().json;\nconst budget = $('Parse Budget Plan').first().json;\nconst proposal = $('Parse Campaign Strategy').first().json;\nconst safety = $('Parse Safety Review').first().json;\nconst now = new Date().toISOString();\n\nlet persistedStrategies = [];\ntry { persistedStrategies = $('Upsert Campaign Strategies').all(); } catch {}\n\nconst payload = {\n  ...(request.request_payload ?? {}),\n  strategy_status: safety.approved ? 'ready' : 'needs_review',\n  strategy_generated_at: now,\n  strategy_completed_at: now,\n  content_analysis: content,\n  historical_analysis: history,\n  audience_plan: audience,\n  budget_plan: budget,\n  campaign_strategy: proposal,\n  safety_review: safety,\n  selected_strategy_tier: safety.recommended_tier,\n  persisted_strategy_count: persistedStrategies.length,\n  initial_meta_status: 'PAUSED',\n  strategist_version: 'ws-03-async-v1'\n};\n\nreturn [{json:{\n  request_id:request.id,\n  approved:safety.approved,\n  patch:{\n    status:safety.approved ? 'strategy_ready' : 'strategy_review_required',\n    error_code:safety.approved ? null : 'STRATEGY_REVIEW_REQUIRED',\n    error_message:safety.approved ? null : (safety.violations ?? []).join(' | '),\n    request_payload:payload\n  }\n}}];\n"
+      },
+      "id": "bc63429e-d25c-4f3e-91be-33fca7c0567d",
+      "name": "Build Strategy Patch",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        15888,
+        -48
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ 'https://wsmbaueobuzilyagtnuq.supabase.co/rest/v1/campaign_creation_requests?id=eq.' + $json.request_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.patch }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "99637acd-0c1a-4ca5-b9a9-086c8bbd15e6",
+      "name": "Save Strategy",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        16128,
+        -48
+      ],
+      "credentials": {
+        "httpCustomAuth": {
+          "id": "0akO77AeyCnD4XDu",
+          "name": "White Style Supabase Service Role"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $json;\n\nlet row = null;\n\nif (Array.isArray(raw)) {\n  row = raw[0] ?? null;\n} else if (Array.isArray(raw?.data)) {\n  row = raw.data[0] ?? null;\n} else if (raw && typeof raw === 'object') {\n  row = raw;\n}\n\nconst p = row?.request_payload ?? {};\n\nlet strategies = [];\n\ntry {\n  strategies = $('Upsert Campaign Strategies')\n    .all()\n    .flatMap(item => {\n      if (Array.isArray(item.json)) return item.json;\n      if (Array.isArray(item.json?.data)) return item.json.data;\n      return item.json?.id ? [item.json] : [];\n    });\n} catch {}\n\nreturn [{\n  json: {\n    ok: row?.status === 'strategy_ready',\n    request_id: row?.id ?? null,\n    status: row?.status ?? null,\n    recommended_tier: p.selected_strategy_tier ?? null,\n    persisted_strategy_count: strategies.length,\n    strategies,\n    safety_review: p.safety_review ?? null,\n    completed_at: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "7508ff4d-3dad-4160-b751-94a3e6287303",
+      "name": "Strategy Execution Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        16368,
+        -48
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nreturn [{json:{\n  ok:false,\n  http_status:$json.http_status ?? 400,\n  error_code:$json.error?.code ?? 'STRATEGY_REQUEST_FAILED',\n  error_message:$json.error?.message ?? 'تعذر توليد استراتيجية الحملة.'\n}}];\n"
+      },
+      "id": "8c4dae32-4e76-46e1-9dbd-0b3c2d16f6f0",
+      "name": "Format Early Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        11312,
+        416
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": "={{ $json.http_status }}"
+        }
+      },
+      "id": "652c4bcf-aa46-4754-a1da-d11c204cb3ad",
+      "name": "Respond Early Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        11552,
+        416
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://wsmbaueobuzilyagtnuq.supabase.co/rest/v1/content_library?id=eq.' + ($('Validate Request').first().json.request.request_payload?.content_library_id || '00000000-0000-0000-0000-000000000000') + '&select=*' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "cafa060e-e8a4-48c1-8bf4-e3e19bf2718e",
+      "name": "Load Selected Content",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        11072,
+        144
+      ],
+      "credentials": {
+        "httpCustomAuth": {
+          "id": "0akO77AeyCnD4XDu",
+          "name": "White Style Supabase Service Role"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const request = $('Validate Request').first().json.request;\nconst proposal = $('Parse Campaign Strategy').first().json;\nconst safety = $('Parse Safety Review').first().json;\n\nconst expectedTiers = ['conservative', 'balanced', 'aggressive'];\nconst rawStrategies = Array.isArray(proposal.strategies)\n  ? proposal.strategies\n  : [];\n\nconst normalizedStrategies = rawStrategies.map((strategy) => ({\n  ...strategy,\n  tier: String(strategy?.tier ?? '').trim().toLowerCase()\n}));\n\nconst receivedTiers = normalizedStrategies.map((strategy) => strategy.tier);\nconst uniqueTiers = [...new Set(receivedTiers)];\n\nconst missingTiers = expectedTiers.filter(\n  (tier) => !uniqueTiers.includes(tier)\n);\n\nconst duplicateTiers = uniqueTiers.filter(\n  (tier) => receivedTiers.filter((value) => value === tier).length > 1\n);\n\nconst unsupportedTiers = uniqueTiers.filter(\n  (tier) => !expectedTiers.includes(tier)\n);\n\nif (\n  normalizedStrategies.length !== 3 ||\n  uniqueTiers.length !== 3 ||\n  missingTiers.length ||\n  duplicateTiers.length ||\n  unsupportedTiers.length\n) {\n  throw new Error(\n    [\n      'INVALID_STRATEGY_TIERS',\n      `Expected exactly: ${expectedTiers.join(', ')}`,\n      `Received: ${receivedTiers.join(', ') || 'none'}`,\n      missingTiers.length\n        ? `Missing: ${missingTiers.join(', ')}`\n        : null,\n      duplicateTiers.length\n        ? `Duplicates: ${duplicateTiers.join(', ')}`\n        : null,\n      unsupportedTiers.length\n        ? `Unsupported: ${unsupportedTiers.join(', ')}`\n        : null\n    ].filter(Boolean).join(' | ')\n  );\n}\n\nconst strategyByTier = Object.fromEntries(\n  normalizedStrategies.map((strategy) => [strategy.tier, strategy])\n);\n\nconst selectedTierCandidate = String(\n  safety.recommended_tier ??\n  proposal.recommended_tier ??\n  'balanced'\n).trim().toLowerCase();\n\nconst selectedTier = expectedTiers.includes(selectedTierCandidate)\n  ? selectedTierCandidate\n  : 'balanced';\n\nconst warnings = Array.isArray(safety.warnings)\n  ? safety.warnings\n  : [];\n\nconst requiredChecks = Array.isArray(safety.required_human_checks)\n  ? safety.required_human_checks\n  : [];\n\nconst rows = expectedTiers.map((tier) => {\n  const strategy = strategyByTier[tier];\n\n  const ageMin = Number(strategy.age_min);\n  const ageMax = Number(strategy.age_max);\n  const dailyBudget = Number(strategy.daily_budget);\n  const durationDays = Number(strategy.duration_days);\n  const confidence = Number(strategy.confidence ?? 0);\n\n  if (\n    !Number.isFinite(dailyBudget) ||\n    dailyBudget < 5 ||\n    dailyBudget > 25\n  ) {\n    throw new Error(\n      `INVALID_DAILY_BUDGET | tier=${tier} | value=${strategy.daily_budget}`\n    );\n  }\n\n  if (\n    !Number.isInteger(durationDays) ||\n    durationDays < 3 ||\n    durationDays > 14\n  ) {\n    throw new Error(\n      `INVALID_DURATION | tier=${tier} | value=${strategy.duration_days}`\n    );\n  }\n\n  if (\n    !Number.isInteger(ageMin) ||\n    !Number.isInteger(ageMax) ||\n    ageMin < 18 ||\n    ageMax > 65 ||\n    ageMax < ageMin\n  ) {\n    throw new Error(\n      `INVALID_AGE_RANGE | tier=${tier} | age_min=${strategy.age_min} | age_max=${strategy.age_max}`\n    );\n  }\n\n  return {\n    organization_id: request.organization_id,\n    request_id: request.id,\n    target_ad_account_id: request.target_ad_account_id,\n    tier,\n    campaign_name: proposal.campaign_name,\n    objective: proposal.objective,\n    optimization_goal: proposal.optimization_goal,\n    billing_event: proposal.billing_event ?? 'IMPRESSIONS',\n    bid_strategy: proposal.bid_strategy ?? 'LOWEST_COST_WITHOUT_CAP',\n    destination_type: proposal.destination_type,\n    daily_budget: dailyBudget,\n    duration_days: durationDays,\n    age_min: ageMin,\n    age_max: ageMax,\n    gender: strategy.gender,\n    country_codes: Array.isArray(strategy.country_codes)\n      ? strategy.country_codes\n      : ['PS'],\n    placements: Array.isArray(strategy.placements)\n      ? strategy.placements\n      : [],\n    targeting_mode: strategy.targeting_mode ?? null,\n    interest_hints: Array.isArray(strategy.interest_hints)\n      ? strategy.interest_hints\n      : [],\n    confidence,\n    reasons: Array.isArray(strategy.reasons)\n      ? strategy.reasons\n      : [],\n    safety_warnings: [...warnings, ...requiredChecks],\n    strategy_payload: {\n      ...strategy,\n      tier,\n      campaign_name: proposal.campaign_name,\n      objective: proposal.objective,\n      optimization_goal: proposal.optimization_goal,\n      billing_event: proposal.billing_event,\n      bid_strategy: proposal.bid_strategy,\n      destination_type: proposal.destination_type,\n      content_analysis_summary: proposal.content_analysis_summary,\n      historical_analysis_summary: proposal.historical_analysis_summary,\n      safety_review: safety\n    },\n    selected: false,\n    status: 'proposed',\n    build_error_code: null,\n    build_error_message: null\n  };\n});\n\nreturn rows.map((row) => ({ json: row }));"
+      },
+      "id": "8f07a41f-bb4f-4c41-97a2-51cf857cef4b",
+      "name": "Build Strategy Rows",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        14928,
+        -48
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://wsmbaueobuzilyagtnuq.supabase.co/rest/v1/campaign_strategies?on_conflict=request_id,tier",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "resolution=merge-duplicates,return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "c0646381-405b-4486-af4e-bfa472408c97",
+      "name": "Upsert Campaign Strategies",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        15168,
+        -48
+      ],
+      "credentials": {
+        "httpCustomAuth": {
+          "id": "0akO77AeyCnD4XDu",
+          "name": "White Style Supabase Service Role"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const request = $('Validate Request').first().json.request;\nconst status = String(request.status ?? 'draft');\n\nconst blockedStatuses = [\n  'analyzing',\n  'strategy_ready',\n  'strategy_review_required',\n  'building',\n  'ready_for_review',\n  'approved',\n  'published'\n];\n\nconst shouldStart = !blockedStatuses.includes(status);\n\nreturn [{\n  json: {\n    should_start: shouldStart,\n    request_id: request.id,\n    current_status: status,\n    request,\n    response: shouldStart\n      ? null\n      : {\n          ok: true,\n          accepted: false,\n          duplicate_execution_prevented: true,\n          request_id: request.id,\n          status,\n          message:\n            status === 'analyzing'\n              ? 'توليد الاستراتيجية قيد التنفيذ بالفعل.'\n              : 'تم توليد الاستراتيجية أو الانتقال إلى مرحلة لاحقة مسبقًا.'\n        }\n  }\n}];"
+      },
+      "id": "a37a3c19-27a9-4bf1-9b7a-e01baed02969",
+      "name": "Check Existing Strategy Status",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        11072,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "2fa9e40f-47c0-489e-8907-63d18d36c264",
+              "leftValue": "={{ $json.should_start }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "73f978e4-a470-4975-9844-98f2e674da9e",
+      "name": "Should Start Strategy?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        11312,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const request = $('Validate Request').first().json.request;\nconst now = new Date().toISOString();\n\nreturn [{\n  json: {\n    request_id: request.id,\n    patch: {\n      status: 'analyzing',\n      error_code: null,\n      error_message: null,\n      request_payload: {\n        ...(request.request_payload ?? {}),\n        strategy_status: 'analyzing',\n        strategy_started_at: now,\n        strategy_completed_at: null,\n        strategist_version: 'ws-03-async-v1'\n      }\n    }\n  }\n}];"
+      },
+      "id": "c4e165f3-f1be-44bc-a377-69ca07d36cbd",
+      "name": "Build Analyzing Patch",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        11552,
+        16
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ 'https://wsmbaueobuzilyagtnuq.supabase.co/rest/v1/campaign_creation_requests?id=eq.' + $json.request_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.patch }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "34ea65ea-8498-4f22-b0f8-a54ee225b3e9",
+      "name": "Mark Request As Analyzing",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        11792,
+        16
+      ],
+      "credentials": {
+        "httpCustomAuth": {
+          "id": "0akO77AeyCnD4XDu",
+          "name": "White Style Supabase Service Role"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $json;\n\nlet row = null;\n\nif (Array.isArray(raw)) {\n  row = raw[0] ?? null;\n} else if (Array.isArray(raw?.data)) {\n  row = raw.data[0] ?? null;\n} else if (raw && typeof raw === 'object') {\n  row = raw;\n}\n\nconst requestId =\n  row?.id ??\n  $('Build Analyzing Patch').first().json.request_id;\n\nreturn [{\n  json: {\n    ok: true,\n    accepted: true,\n    request_id: requestId,\n    status: 'analyzing',\n    message: 'تم قبول طلب توليد الاستراتيجية وبدأت المعالجة في الخلفية.'\n  }\n}];"
+      },
+      "id": "d7bf6dad-4e27-47c6-b697-a6ea6b413d27",
+      "name": "Format Async Accepted",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        12032,
+        16
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": 202
+        }
+      },
+      "id": "d90c512f-0bac-4f9b-af5d-00a19e8046bc",
+      "name": "Respond Strategy Accepted",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        12272,
+        16
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json.response }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "7536ae0f-ee11-4357-b483-8db6037cdf0b",
+      "name": "Respond Existing Status",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        11552,
+        256
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const request = $('Validate Request').first().json.request;\nconst now = new Date().toISOString();\n\nconst source = $json ?? {};\n\nconst message =\n  source.error?.message ??\n  source.errorMessage ??\n  source.message ??\n  source.description ??\n  'تعذر توليد استراتيجية الحملة.';\n\nconst nodeName =\n  source.node?.name ??\n  source.nodeName ??\n  source.context?.nodeName ??\n  null;\n\nreturn [{\n  json: {\n    request_id: request.id,\n    patch: {\n      status: 'failed',\n      error_code: 'STRATEGY_GENERATION_FAILED',\n      error_message: nodeName\n        ? `${nodeName}: ${message}`\n        : String(message),\n      request_payload: {\n        ...(request.request_payload ?? {}),\n        strategy_status: 'failed',\n        strategy_failed_at: now,\n        strategy_failure: {\n          node: nodeName,\n          message: String(message)\n        },\n        strategist_version: 'ws-03-async-v1'\n      }\n    }\n  }\n}];"
+      },
+      "id": "5650462a-d6f0-4a64-ad5d-62a496d80272",
+      "name": "Build Strategy Failure Patch",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        14688,
+        368
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ 'https://wsmbaueobuzilyagtnuq.supabase.co/rest/v1/campaign_creation_requests?id=eq.' + $json.request_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.patch }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "38a4b2f4-903a-440f-b373-54a1e2d34197",
+      "name": "Save Strategy Failure",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        14928,
+        368
+      ],
+      "credentials": {
+        "httpCustomAuth": {
+          "id": "0akO77AeyCnD4XDu",
+          "name": "White Style Supabase Service Role"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $json;\nconst row = Array.isArray(raw)\n  ? (raw[0] ?? null)\n  : (Array.isArray(raw?.data) ? raw.data[0] : raw);\n\nreturn [{\n  json: {\n    ok: false,\n    request_id: row?.id ?? $('Build Strategy Failure Patch').first().json.request_id,\n    status: row?.status ?? 'failed',\n    error_code: row?.error_code ?? 'STRATEGY_GENERATION_FAILED',\n    error_message: row?.error_message ?? 'تعذر توليد استراتيجية الحملة.'\n  }\n}];"
+      },
+      "id": "df247a03-8a63-44b1-88b8-ac7608b9408a",
+      "name": "Strategy Failure Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        15168,
+        368
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const request = $('Validate Request').first().json.request;\nconst proposal = $('Parse Campaign Strategy').first().json;\nconst safety = $('Parse Safety Review').first().json;\n\nconst allowed = ['conservative', 'balanced', 'aggressive'];\n\nconst candidate = String(\n  safety.recommended_tier ??\n  proposal.recommended_tier ??\n  'balanced'\n).trim().toLowerCase();\n\nconst tier = allowed.includes(candidate) ? candidate : 'balanced';\n\nreturn [{\n  json: {\n    request_id: request.id,\n    tier,\n    patch: {\n      selected: true,\n      status: 'selected'\n    }\n  }\n}];"
+      },
+      "id": "f3a82a36-2992-416b-9df7-583bda3a97b3",
+      "name": "Prepare Selected Strategy",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        15360,
+        -48
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ 'https://wsmbaueobuzilyagtnuq.supabase.co/rest/v1/campaign_strategies?request_id=eq.' + $json.request_id + '&tier=eq.' + $json.tier }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.patch }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "b850868f-937a-424e-8d57-60b526100320",
+      "name": "Select Recommended Strategy",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        15600,
+        -48
+      ],
+      "credentials": {
+        "httpCustomAuth": {
+          "id": "0akO77AeyCnD4XDu",
+          "name": "White Style Supabase Service Role"
+        }
+      },
+      "onError": "continueErrorOutput"
+    }
+  ],
+  "connections": {
+    "Strategy Webhook": {
+      "main": [
+        [
+          {
+            "node": "Normalize Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Test": {
+      "main": [
+        [
+          {
+            "node": "Manual Test Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Test Input": {
+      "main": [
+        [
+          {
+            "node": "Normalize Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Input": {
+      "main": [
+        [
+          {
+            "node": "Valid ID?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valid ID?": {
+      "main": [
+        [
+          {
+            "node": "Load Campaign Request",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Early Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Campaign Request": {
+      "main": [
+        [
+          {
+            "node": "Validate Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Request": {
+      "main": [
+        [
+          {
+            "node": "Request Ready?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Request Ready?": {
+      "main": [
+        [
+          {
+            "node": "Check Existing Strategy Status",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Early Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load 90-Day Insights": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Performance",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Performance": {
+      "main": [
+        [
+          {
+            "node": "Build Agent Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Agent Context": {
+      "main": [
+        [
+          {
+            "node": "AI - Content Analyst",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI - Content Analyst": {
+      "main": [
+        [
+          {
+            "node": "Parse Content Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Strategy Failure Patch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Content Analysis": {
+      "main": [
+        [
+          {
+            "node": "AI - Historical Analyst",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Strategy Failure Patch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI - Historical Analyst": {
+      "main": [
+        [
+          {
+            "node": "Parse Historical Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Strategy Failure Patch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Historical Analysis": {
+      "main": [
+        [
+          {
+            "node": "AI - Audience Planner",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Strategy Failure Patch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI - Audience Planner": {
+      "main": [
+        [
+          {
+            "node": "Parse Audience Plan",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Strategy Failure Patch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Audience Plan": {
+      "main": [
+        [
+          {
+            "node": "AI - Budget Planner",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Strategy Failure Patch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI - Budget Planner": {
+      "main": [
+        [
+          {
+            "node": "Parse Budget Plan",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Strategy Failure Patch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Budget Plan": {
+      "main": [
+        [
+          {
+            "node": "AI - Strategy Builder",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Strategy Failure Patch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI - Strategy Builder": {
+      "main": [
+        [
+          {
+            "node": "Parse Campaign Strategy",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Strategy Failure Patch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Campaign Strategy": {
+      "main": [
+        [
+          {
+            "node": "AI - Safety Reviewer",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Strategy Failure Patch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI - Safety Reviewer": {
+      "main": [
+        [
+          {
+            "node": "Parse Safety Review",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Strategy Failure Patch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Safety Review": {
+      "main": [
+        [
+          {
+            "node": "Build Strategy Rows",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Strategy Failure Patch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Strategy Patch": {
+      "main": [
+        [
+          {
+            "node": "Save Strategy",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Strategy Failure Patch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Strategy": {
+      "main": [
+        [
+          {
+            "node": "Strategy Execution Summary",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Strategy Failure Patch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Early Error": {
+      "main": [
+        [
+          {
+            "node": "Respond Early Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Selected Content": {
+      "main": [
+        [
+          {
+            "node": "Load 90-Day Insights",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Strategy Rows": {
+      "main": [
+        [
+          {
+            "node": "Upsert Campaign Strategies",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Strategy Failure Patch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Campaign Strategies": {
+      "main": [
+        [
+          {
+            "node": "Prepare Selected Strategy",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Strategy Failure Patch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Existing Strategy Status": {
+      "main": [
+        [
+          {
+            "node": "Should Start Strategy?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Should Start Strategy?": {
+      "main": [
+        [
+          {
+            "node": "Build Analyzing Patch",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Existing Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Analyzing Patch": {
+      "main": [
+        [
+          {
+            "node": "Mark Request As Analyzing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Request As Analyzing": {
+      "main": [
+        [
+          {
+            "node": "Format Async Accepted",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Async Accepted": {
+      "main": [
+        [
+          {
+            "node": "Respond Strategy Accepted",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond Strategy Accepted": {
+      "main": [
+        [
+          {
+            "node": "Load Selected Content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Strategy Execution Summary": {
+      "main": [
+        []
+      ]
+    },
+    "Build Strategy Failure Patch": {
+      "main": [
+        [
+          {
+            "node": "Save Strategy Failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Strategy Failure": {
+      "main": [
+        [
+          {
+            "node": "Strategy Failure Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Strategy Failure Summary": {
+      "main": [
+        []
+      ]
+    },
+    "Prepare Selected Strategy": {
+      "main": [
+        [
+          {
+            "node": "Select Recommended Strategy",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Select Recommended Strategy": {
+      "main": [
+        [
+          {
+            "node": "Build Strategy Patch",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Strategy Failure Patch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "3627ba6daf2493916a6fceb2a3504fb1c7a7c5bdb98b4f0c08b1ab54ef103805"
+  },
+  "name": "WS-03 Multi-Agent Campaign Strategist - Async Production v1.2",
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Hebron",
+    "saveManualExecutions": true,
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveExecutionProgress": true
+  },
+  "versionId": "9683d569-4353-4862-9165-6e07005d4982"
+}

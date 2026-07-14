@@ -18,10 +18,21 @@ import {
   Info,
   Calendar,
   Layers,
-  RefreshCw
+  RefreshCw,
+  Terminal,
+  ChevronDown,
+  ChevronUp,
+  Sparkles,
+  ExternalLink,
+  DollarSign,
+  MapPin,
+  Users,
+  Compass
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
+import { createClient } from "@/lib/supabase/client";
+import { formatArabicDate } from "@/lib/readable-helpers";
 
 interface PageProps {
   params: Promise<{ requestId: string }>;
@@ -40,27 +51,51 @@ export default function Page({ params }: PageProps) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isBuildingRetry, setIsBuildingRetry] = useState(false);
 
-  // Stepper progress index (0 to 5)
-  const [activeStepIdx, setActiveStepIdx] = useState(0);
-  const [pollingTimeElapsed, setPollingTimeElapsed] = useState(0);
+  // V2 Settings & Automation state
+  const [expertMode, setExpertMode] = useState<boolean | null>(null);
+  const [isAutoBuilding, setIsAutoBuilding] = useState<boolean>(false);
+  const [isLogOpen, setIsLogOpen] = useState<boolean>(false);
+  const [isDecisionOpen, setIsDecisionOpen] = useState<boolean>(false);
+
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const stepTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const progressSteps = [
-    { key: "building", label: "تشغيل محرك بناء الحملة (WS-04)" },
-    { key: "creating_campaign", label: "إنشاء الحملة الإعلانية على Meta Ads Manager" },
-    { key: "creating_adset", label: "إنشاء المجموعة الإعلانية وتفاصيل الاستهداف الجغرافي" },
-    { key: "uploading_creative", label: "رفع وتجهيز التصميم والنص الإعلاني (Creative)" },
-    { key: "creating_ad", label: "إنشاء الإعلانات وربطها بالواتساب والمحافظ الإعلانية" },
-    { key: "completed", label: "الحملة جاهزة وموقوفة مؤقتاً بانتظار مراجعتك البشرية" }
+    { key: "created", label: "إنشاء طلب الترويج الذكي (Request Created)" },
+    { key: "resolver", label: "استقبال وحل المحتوى من المكتبة (Content Library Intake)" },
+    { key: "content_analysis", label: "تحليل المحتوى بالذكاء الاصطناعي (Content AI Analysis)" },
+    { key: "historical_analysis", label: "التحليل التاريخي والمنصات (Historical Data Query)" },
+    { key: "audience_plan", label: "تخطيط الجمهور المستهدف (Target Audience Planning)" },
+    { key: "budget_plan", label: "توزيع وتخطيط الموازنة الإعلانية (Budget Strategy Allocation)" },
+    { key: "safety_review", label: "مراجعة الأمان والامتثال للسياسات (Safety & Compliance Review)" },
+    { key: "strategy_selected", label: "تحديد واختيار استراتيجية Meta الأنسب (Strategy Engine Run)" },
+    { key: "meta_campaign", label: "إنشاء الحملة الإعلانية (Creating Meta Campaign)" },
+    { key: "meta_adset", label: "تهيئة المجموعة الإعلانية والاستهداف (Configuring Meta Ad Set)" },
+    { key: "meta_creative", label: "رفع وتجهيز التصميم والنص الإعلاني (Uploading Ad Creative)" },
+    { key: "meta_ad", label: "نشر الإعلان وتفعيل التتبع (Deploying Live Advertisement)" }
   ];
 
-  // 1. Fetch initial details
+  // 1. Fetch initial details & Settings on mount
   useEffect(() => {
-    loadDetails();
+    async function loadSettingsAndDetails() {
+      const supabase = createClient();
+      try {
+        const { data } = await supabase
+          .from("organization_settings")
+          .select("expert_mode")
+          .eq("organization_id", "11111111-1111-4111-8111-111111111111")
+          .maybeSingle();
+        setExpertMode(data?.expert_mode ?? false);
+      } catch (err) {
+        console.error("Error loading settings:", err);
+        setExpertMode(false);
+      }
+      await loadDetails();
+    }
+
+    loadSettingsAndDetails();
+
     return () => {
       stopPolling();
-      stopStepTimer();
     };
   }, [requestId]);
 
@@ -82,59 +117,52 @@ export default function Page({ params }: PageProps) {
         setSelectedStrategy(selected);
       }
 
-      // Handle Page Routing & Polling state
-      handleBuildWorkflowState(reqData);
+      handleBuildWorkflowState(reqData, strats);
     }
   };
 
-  const handleBuildWorkflowState = (req: CampaignCreationRequest) => {
+  const handleBuildWorkflowState = (req: CampaignCreationRequest, strats: CampaignStrategy[]) => {
+    // If request status is terminal or ready, stop polling
+    const terminalStatuses = ["ready_for_review", "approved", "published", "failed"];
+    
     if (req.status === "building") {
       startBuildPolling();
-      startStepSimulation();
-    } else if (req.status === "ready_for_review" || req.status === "approved" || req.status === "published") {
-      // Completed, set stepper to final step
-      setActiveStepIdx(5);
-    } else if (req.status === "draft" || req.status === "strategy_ready") {
-      // Redirect back to strategy review page if not building
-      router.push(`/campaigns/${requestId}/strategy`);
+    } else if (terminalStatuses.includes(req.status)) {
+      stopPolling();
+    } else if (req.status === "draft" || req.status === "analyzing") {
+      // Keep polling to watch resolution and AI strategy generation progress
+      startBuildPolling();
+    } else if (req.status === "strategy_ready") {
+      // Check if we should automatically promote (expertMode = OFF)
+      if (expertMode === false && !isAutoBuilding) {
+        triggerAutoBuild(strats);
+      } else if (expertMode === true) {
+        // If expert mode is ON, we shouldn't be on the building page while in strategy_ready state
+        router.push(`/campaigns/${requestId}/strategy`);
+      }
     }
   };
 
-  // Step checklist simulation for visual excellence
-  const startStepSimulation = () => {
-    stopStepTimer();
-    setActiveStepIdx(0);
-    stepTimerRef.current = setInterval(() => {
-      setActiveStepIdx((prev) => {
-        if (prev < 4) {
-          return prev + 1;
-        }
-        return prev; // hold at step 4 (creating_ad) until DB status is ready_for_review
-      });
-    }, 1500);
-  };
-
-  const stopStepTimer = () => {
-    if (stepTimerRef.current) {
-      clearInterval(stepTimerRef.current);
-      stepTimerRef.current = null;
+  const triggerAutoBuild = async (strats: CampaignStrategy[]) => {
+    setIsAutoBuilding(true);
+    const recommendedTier = strats.find((s) => s.selected === true)?.tier || "balanced";
+    
+    console.log(`[Auto-Build] Bypassing human approval. Selecting recommended tier: ${recommendedTier}`);
+    const buildRes = await buildCampaign(requestId, recommendedTier);
+    
+    setIsAutoBuilding(false);
+    if (buildRes.error) {
+      setErrorMessage("فشل الترويج الآلي التلقائي: " + buildRes.error);
+    } else {
+      // Refresh to fetch latest status
+      loadDetails();
     }
   };
 
-  // 2. Active GET Polling
+  // 2. Active 3-Seconds GET Polling
   const startBuildPolling = () => {
     stopPolling();
-    setPollingTimeElapsed(0);
     pollIntervalRef.current = setInterval(async () => {
-      setPollingTimeElapsed((prev) => {
-        const nextTime = prev + 3;
-        if (nextTime >= 300) {
-          stopPolling();
-          stopStepTimer();
-        }
-        return nextTime;
-      });
-
       const res = await fetchRequestDetails(requestId);
       if (res.data) {
         const { request: reqData, strategies: strats } = res.data;
@@ -146,15 +174,14 @@ export default function Page({ params }: PageProps) {
           setSelectedStrategy(selected);
         }
 
-        // Terminal statuses to stop polling
+        // Check auto-build in polling loop if state changes to strategy_ready
+        if (reqData.status === "strategy_ready" && expertMode === false && !isAutoBuilding) {
+          triggerAutoBuild(strats);
+        }
+
         const stopStatuses = ["ready_for_review", "approved", "published", "failed"];
         if (stopStatuses.includes(reqData.status)) {
           stopPolling();
-          stopStepTimer();
-          
-          if (reqData.status === "ready_for_review" || reqData.status === "approved" || reqData.status === "published") {
-            setActiveStepIdx(5); // fast-forward to completed
-          }
         }
       }
     }, 3000);
@@ -167,7 +194,7 @@ export default function Page({ params }: PageProps) {
     }
   };
 
-  // 3. Retry Build
+  // 3. Manual Retry Build
   const handleRetryBuild = async () => {
     if (!selectedStrategy || isBuildingRetry) return;
     setIsBuildingRetry(true);
@@ -179,9 +206,7 @@ export default function Page({ params }: PageProps) {
     if (res.error) {
       setErrorMessage(res.error);
     } else {
-      // Restart simulation & polling
       startBuildPolling();
-      startStepSimulation();
       if (res.data) {
         setRequest(res.data);
       }
@@ -204,16 +229,90 @@ export default function Page({ params }: PageProps) {
         setSelectedStrategy(selected);
       }
 
-      if (reqData.status === "building") {
-        startBuildPolling();
-        startStepSimulation();
-      } else {
-        stopPolling();
-        stopStepTimer();
-        if (reqData.status === "ready_for_review" || reqData.status === "approved" || reqData.status === "published") {
-          setActiveStepIdx(5);
-        }
-      }
+      handleBuildWorkflowState(reqData, strats);
+    }
+  };
+
+  // Helper to compute progress checklist based on Meta IDs and internal status
+  const getStepStatus = (idx: number): "completed" | "running" | "pending" | "failed" => {
+    if (!request) return "pending";
+    const status = request.status;
+    const payload = request.request_payload || {};
+    const selectedStrat = strategies.find(s => s.selected === true) || selectedStrategy;
+
+    // Meta IDs as the primary Source of Truth
+    const hasAd = !!selectedStrat?.meta_ad_id;
+    const hasCreative = !!selectedStrat?.meta_creative_id || hasAd;
+    const hasAdset = !!selectedStrat?.meta_adset_id || hasCreative;
+    const hasCampaign = !!selectedStrat?.meta_campaign_id || hasAdset;
+
+    const isFailed = status === "failed";
+
+    switch (idx) {
+      case 0: // Request Created
+        return "completed";
+      
+      case 1: // Content Library Intake
+        if (status === "resolution_failed") return "failed";
+        if (payload.resolver_status === "resolved" || status !== "draft") return "completed";
+        return "running";
+      
+      case 2: // Content AI Analysis
+        if (payload.content_analysis) return "completed";
+        if (payload.resolver_status === "resolved") return "running";
+        return "pending";
+
+      case 3: // Historical Data Query
+        if (payload.historical_analysis) return "completed";
+        if (payload.content_analysis) return "running";
+        return "pending";
+
+      case 4: // Target Audience Planning
+        if (payload.audience_plan) return "completed";
+        if (payload.historical_analysis) return "running";
+        return "pending";
+
+      case 5: // Budget Strategy Allocation
+        if (payload.budget_plan) return "completed";
+        if (payload.audience_plan) return "running";
+        return "pending";
+
+      case 6: // Safety & Compliance Review
+        if (payload.safety_review) return "completed";
+        if (payload.budget_plan) return "running";
+        return "pending";
+
+      case 7: // Strategy Engine Run
+        if (request.selected_strategy || selectedStrat || ["building", "ready_for_review", "approved", "published"].includes(status)) return "completed";
+        if (payload.safety_review) return "running";
+        return "pending";
+
+      case 8: // Creating Meta Campaign
+        if (hasCampaign) return "completed";
+        if (status === "building") return "running";
+        if (isFailed && !hasCampaign) return "failed";
+        return "pending";
+
+      case 9: // Configuring Meta Ad Set
+        if (hasAdset) return "completed";
+        if (hasCampaign) return "running";
+        if (isFailed && !hasAdset && hasCampaign) return "failed";
+        return "pending";
+
+      case 10: // Uploading Ad Creative
+        if (hasCreative) return "completed";
+        if (hasAdset) return "running";
+        if (isFailed && !hasCreative && hasAdset) return "failed";
+        return "pending";
+
+      case 11: // Deploying Live Advertisement
+        if (hasAd || ["ready_for_review", "approved", "published"].includes(status)) return "completed";
+        if (hasCreative) return "running";
+        if (isFailed && !hasAd && hasCreative) return "failed";
+        return "pending";
+
+      default:
+        return "pending";
     }
   };
 
@@ -240,8 +339,11 @@ export default function Page({ params }: PageProps) {
   }
 
   const isFailed = request.status === "failed";
-  const isBuildingActive = request.status === "building";
+  const isBuildingActive = request.status === "building" || request.status === "analyzing" || request.status === "draft";
   const isReady = ["ready_for_review", "approved", "published"].includes(request.status);
+
+  // Format events logs
+  const timelineLogs = request.execution_timeline || [];
 
   return (
     <Shell>
@@ -251,20 +353,20 @@ export default function Page({ params }: PageProps) {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
             <button
-              onClick={() => router.push(`/campaigns/${requestId}/strategy`)}
-              disabled={isBuildingActive}
+              onClick={() => router.push("/create-campaign")}
+              disabled={isBuildingActive && !isFailed}
               className="sync-button"
-              style={{ padding: "6px 12px", background: "rgba(255,255,255,0.03)", borderColor: "var(--border)", fontSize: "12px", opacity: isBuildingActive ? 0.4 : 1 }}
+              style={{ padding: "6px 12px", background: "rgba(255,255,255,0.03)", borderColor: "var(--border)", fontSize: "12px", opacity: isBuildingActive && !isFailed ? 0.4 : 1 }}
             >
               <ArrowLeft size={14} style={{ marginLeft: "4px" }} />
-              العودة لمراجعة الاستراتيجيات
+              مركز التسويق بالذكاء الاصطناعي
             </button>
-            <h1 style={{ fontSize: "18px", fontWeight: "700" }}>حالة بناء الحملة على Meta</h1>
+            <h1 style={{ fontSize: "18px", fontWeight: "700" }}>مركز التحكم والترويج التلقائي الذكي</h1>
           </div>
 
           <button
             onClick={handleRefresh}
-            disabled={isSyncing || isBuildingActive}
+            disabled={isSyncing || (isBuildingActive && !isFailed)}
             className="sync-button"
             style={{ height: "36px", padding: "0 14px", fontSize: "12.5px" }}
           >
@@ -283,110 +385,167 @@ export default function Page({ params }: PageProps) {
         )}
 
         {/* 1. Build Progress Loader Checklist */}
-        {(isBuildingActive || isFailed) && (
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1.6fr", gap: "24px", alignItems: "start" }}>
+        {isBuildingActive && (
+          <div style={{ display: "grid", gridTemplateColumns: "1.8fr 1fr", gap: "24px", alignItems: "start" }}>
             
             {/* Checklist */}
-            <div className="panel" style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-              <h2 style={{ fontSize: "15px", fontWeight: "600" }}>سير عملية البناء (WS-04)</h2>
+            <div className="panel" style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid var(--border)", paddingBottom: "12px" }}>
+                <h2 style={{ fontSize: "15px", fontWeight: "700", margin: 0, display: "flex", alignItems: "center", gap: "8px" }}>
+                  <Loader2 size={16} className="animate-spin" style={{ color: "var(--blue)" }} />
+                  سير العملية الذاتية المستقلة (Smart V2 Engine)
+                </h2>
+                <span className="badge badge--info" style={{ fontSize: "11px" }}>جاري التنفيذ التلقائي</span>
+              </div>
               
-              <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: "14px", padding: "4px 0" }}>
                 {progressSteps.map((step, idx) => {
-                  const isCompleted = idx < activeStepIdx && !isFailed;
-                  const isCurrent = idx === activeStepIdx && !isFailed;
-                  const isPending = idx > activeStepIdx || isFailed;
+                  const stepState = getStepStatus(idx);
 
                   let stepColor = "var(--muted)";
                   let icon = <div style={{ width: "8px", height: "8px", borderRadius: "50%", background: "var(--border)" }} />;
 
-                  if (isCompleted) {
+                  if (stepState === "completed") {
                     stepColor = "var(--green)";
                     icon = <CheckCircle2 size={16} style={{ color: "var(--green)", fill: "rgba(16, 185, 129, 0.05)" }} />;
-                  } else if (isCurrent) {
+                  } else if (stepState === "running") {
                     stepColor = "var(--blue)";
                     icon = <Loader2 size={16} className="animate-spin" style={{ color: "var(--blue)" }} />;
-                  } else if (isFailed && idx === activeStepIdx) {
+                  } else if (stepState === "failed") {
                     stepColor = "var(--red)";
                     icon = <AlertCircle size={16} style={{ color: "var(--red)", fill: "rgba(239, 68, 68, 0.05)" }} />;
                   }
 
                   return (
                     <div key={step.key} style={{ display: "flex", gap: "12px", alignItems: "center" }}>
-                      <div style={{ width: "24px", height: "24px", display: "grid", placeItems: "center" }}>
+                      <div style={{ width: "24px", height: "24px", display: "grid", placeItems: "center", flexShrink: 0 }}>
                         {icon}
                       </div>
-                      <span style={{ fontSize: "13px", fontWeight: isCurrent ? "600" : "500", color: stepColor }}>
+                      <span style={{ fontSize: "13px", fontWeight: stepState === "running" ? "700" : "500", color: stepColor }}>
                         {step.label}
                       </span>
                     </div>
                   );
                 })}
               </div>
-              
-              {isBuildingActive && (
-                <div style={{ fontSize: "11.5px", color: "var(--muted)", borderTop: "1px solid var(--border)", paddingTop: "12px", textAlign: "center" }}>
-                  يستغرق هذا الإجراء عادةً من 10 إلى 15 ثانية...
-                </div>
-              )}
             </div>
 
-            {/* Side Status Detail */}
+            {/* Sidebar Context */}
             <div className="panel" style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
               <div style={{ display: "flex", gap: "10px", alignItems: "start" }}>
-                <Info size={18} style={{ color: "var(--blue)", marginTop: "2px" }} />
+                <Sparkles size={18} style={{ color: "var(--green)", marginTop: "2px", flexShrink: 0 }} />
                 <div>
-                  <h3 style={{ fontSize: "14px", fontWeight: "600", margin: 0 }}>مزامنة فورية مع منصات فيسبوك</h3>
-                  <p style={{ fontSize: "13px", color: "var(--muted)", lineHeight: "1.6", marginTop: "6px" }}>
-                    يتم بناء عناصر الإعلان وهيكليته البرمجية مباشرة على Meta Ads API. تضمن هذه الخطوة بناء الحملة كـ <strong>موقوفة مؤقتاً (PAUSED)</strong> بشكل دائم لضمان التحكم في النشر والمراجعة.
+                  <h3 style={{ fontSize: "14px", fontWeight: "600", margin: 0 }}>نظام الترويج بلمسة واحدة</h3>
+                  <p style={{ fontSize: "12.5px", color: "var(--muted)", lineHeight: "1.6", marginTop: "6px" }}>
+                    يقوم الذكاء الاصطناعي بتحليل جودة المنشور وتوليد استهداف Meta الدقيق تلقائياً. لن تحتاج لإدخال أي ميزانيات أو جماهير يدوياً.
                   </p>
                 </div>
               </div>
-
-              {isFailed && (
-                <div style={{ borderTop: "1px solid var(--border)", paddingTop: "16px", display: "flex", flexDirection: "column", gap: "10px" }}>
-                  <div style={{ display: "flex", gap: "6px", alignItems: "center", color: "var(--red)" }}>
-                    <ShieldAlert size={16} />
-                    <strong style={{ fontSize: "13px" }}>فشل بناء الحملة على Meta</strong>
-                  </div>
-                  <div style={{ background: "rgba(0,0,0,0.2)", padding: "10px", borderRadius: "4px", fontSize: "12px", color: "var(--red)" }}>
-                    <div><strong>رمز الخطأ:</strong> <code>{request.error_code || "BUILD_API_ERROR"}</code></div>
-                    <div style={{ marginTop: "4px" }}><strong>السبب:</strong> {request.error_message || "Meta API rejects connection token or budget exceeds daily limit."}</div>
-                  </div>
-                  <button
-                    onClick={handleRetryBuild}
-                    disabled={isBuildingRetry}
-                    className="sync-button"
-                    style={{ borderColor: "var(--red)", color: "var(--red)", alignSelf: "flex-start", background: "rgba(239, 68, 68, 0.02)" }}
-                  >
-                    {isBuildingRetry ? "جاري إعادة المحاولة..." : "إعادة محاولة بناء الحملة"}
-                  </button>
+              <div style={{ display: "flex", gap: "10px", alignItems: "start", borderTop: "1px solid var(--border)", paddingTop: "14px" }}>
+                <Terminal size={18} style={{ color: "var(--blue)", marginTop: "2px", flexShrink: 0 }} />
+                <div>
+                  <h3 style={{ fontSize: "14px", fontWeight: "600", margin: 0 }}>مراقبة المزامنة المباشرة</h3>
+                  <p style={{ fontSize: "12.5px", color: "var(--muted)", lineHeight: "1.6", marginTop: "6px" }}>
+                    يتم بناء الإعلان مباشرة على خوادم فيسبوك الرسمية. عند إتمام البناء، ستظهر تفاصيل الحملة مباشرة هنا.
+                  </p>
                 </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 2. Failure Diagnostic Screen */}
+        {isFailed && (
+          <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+            <div className="panel" style={{ border: "1px solid rgba(239, 68, 68, 0.3)", background: "rgba(239, 68, 68, 0.02)" }}>
+              <div style={{ display: "flex", gap: "12px", alignItems: "center", color: "var(--red)", borderBottom: "1px solid rgba(239, 68, 68, 0.15)", paddingBottom: "12px", marginBottom: "14px" }}>
+                <ShieldAlert size={22} />
+                <h2 style={{ fontSize: "16px", fontWeight: "700", margin: 0 }}>حدث خطأ أثناء محاولة بناء الحملة تلقائياً</h2>
+              </div>
+              
+              <div style={{ display: "flex", flexDirection: "column", gap: "12px", fontSize: "13.5px" }}>
+                <div>
+                  <span style={{ color: "var(--muted)" }}>المرحلة التي تعطلت:</span>
+                  <strong style={{ display: "block", marginTop: "2px", color: "var(--foreground)" }}>
+                    {request.error_code === "resolution_failed" ? "تحليل وحل الرابط الأصلي" : "مزامنة وبناء عناصر الحملة على Meta Ads Manager"}
+                  </strong>
+                </div>
+                <div>
+                  <span style={{ color: "var(--muted)" }}>سبب المشكلة التقني:</span>
+                  <p style={{ margin: "2px 0 0 0", color: "var(--red)", fontWeight: "500", lineHeight: "1.5" }}>
+                    {request.error_message || "Meta API rejects connection token or budget exceeds daily limit."}
+                  </p>
+                </div>
+                <div>
+                  <span style={{ color: "var(--muted)" }}>الإجراء المقترح:</span>
+                  <p style={{ margin: "2px 0 0 0", color: "var(--muted)", lineHeight: "1.5" }}>
+                    يرجى التحقق من صحة مفاتيح اتصال الحساب الإعلاني (Access Token) في الإعدادات، أو التأكد من عدم تجاوز الحد الائتماني اليومي للحساب، ثم انقر على زر إعادة البناء أدناه.
+                  </p>
+                </div>
+                <div style={{ borderTop: "1px solid rgba(255,255,255,0.05)", paddingTop: "12px", display: "flex", gap: "10px", alignItems: "center", fontSize: "12px", color: "var(--muted)" }}>
+                  <span>معرف الطلب المرجعي:</span>
+                  <code>{requestId}</code>
+                </div>
+              </div>
+
+              {selectedStrategy && (
+                <button
+                  onClick={handleRetryBuild}
+                  disabled={isBuildingRetry}
+                  className="sync-button"
+                  style={{
+                    marginTop: "16px",
+                    background: "var(--brand-gradient)",
+                    borderColor: "transparent",
+                    color: "white",
+                    fontWeight: "700",
+                    padding: "8px 20px"
+                  }}
+                >
+                  {isBuildingRetry ? "جاري إعادة المحاولة..." : "إعادة محاولة بناء الحملة"}
+                </button>
               )}
             </div>
           </div>
         )}
 
-        {/* 2. Ready For Review Screen (when status is ready_for_review) */}
+        {/* 3. Ready For Review / Success Screen */}
         {isReady && selectedStrategy && (
           <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
             
-            {/* Success Banner */}
-            <div className="panel animate-fade-in" style={{ borderLeft: "4px solid var(--green)", background: "rgba(16, 185, 129, 0.04)" }}>
-              <div style={{ display: "flex", gap: "10px", alignItems: "center", color: "var(--green)" }}>
-                <CheckCircle2 size={22} />
-                <h2 style={{ fontSize: "16px", fontWeight: "700" }}>تم بناء الحملة بنجاح في الحساب الإعلاني!</h2>
+            {/* Success Panel with Framer Motion Scale Animation */}
+            <motion.div 
+              initial="hidden"
+              animate="visible"
+              variants={{
+                hidden: { opacity: 0, y: 15 },
+                visible: { opacity: 1, y: 0, transition: { duration: 0.4 } }
+              }}
+              className="panel" 
+              style={{ borderLeft: "4px solid var(--green)", background: "rgba(16, 185, 129, 0.03)", display: "flex", gap: "16px", alignItems: "center", padding: "20px" }}
+            >
+              <motion.div
+                variants={{
+                  hidden: { scale: 0 },
+                  visible: { scale: 1, transition: { type: "spring", stiffness: 200, damping: 10 } }
+                }}
+                style={{ width: "48px", height: "48px", borderRadius: "50%", background: "rgba(16, 185, 129, 0.1)", display: "grid", placeItems: "center", flexShrink: 0 }}
+              >
+                <CheckCircle2 size={30} style={{ color: "var(--green)" }} />
+              </motion.div>
+              <div>
+                <h2 style={{ fontSize: "17px", fontWeight: "700", margin: 0, color: "var(--green)" }}>تم ترويج وبناء الحملة بنجاح على Meta ✅</h2>
+                <p style={{ fontSize: "13px", color: "var(--muted)", margin: "4px 0 0 0", lineHeight: "1.6" }}>
+                  الحملة الإعلانية بكامل تفاصيلها (الاستهداف والمحتوى) منشأة الآن على حساب الإعلانات الخاص بك بوضع <strong>موقوف مؤقتاً (PAUSED)</strong> لضمان المراجعة والأمان المالي التام.
+                </p>
               </div>
-              <p style={{ fontSize: "13.5px", color: "var(--muted)", marginTop: "6px", lineHeight: "1.6" }}>
-                الحملة الآن موجودة في حساب الإعلانات الخاص بك بوضع <strong>موقوف مؤقتاً (PAUSED)</strong> ومستعدة تماماً لبدء المراجعة البشرية والتفعيل.
-              </p>
-            </div>
+            </motion.div>
 
-            {/* Campaign Specifications Details */}
-            <div style={{ display: "grid", gridTemplateColumns: "2fr 1.2fr", gap: "24px", alignItems: "start" }}>
+            {/* Campaign Specifications details */}
+            <div style={{ display: "grid", gridTemplateColumns: "1.8fr 1fr", gap: "24px", alignItems: "start" }}>
               
-              {/* Review Panel */}
               <div className="panel" style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
-                <h3 style={{ fontSize: "15px", fontWeight: "600", borderBottom: "1px solid var(--border)", paddingBottom: "10px" }}>مواصفات الحملة المشيدة</h3>
+                <h3 style={{ fontSize: "15px", fontWeight: "700", borderBottom: "1px solid var(--border)", paddingBottom: "10px", margin: 0 }}>مواصفات الحملة المشيدة</h3>
                 
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", fontSize: "13px" }}>
                   <div>
@@ -397,40 +556,40 @@ export default function Page({ params }: PageProps) {
                     <span style={{ color: "var(--muted)" }}>حالة الحملة الحالية</span>
                     <strong style={{ display: "flex", alignItems: "center", gap: "6px", marginTop: "4px", color: "var(--amber)" }}>
                       <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: "var(--amber)" }} />
-                      PAUSED (بانتظار المراجعة)
+                      PAUSED (جاهزة للمراجعة والتفعيل)
                     </strong>
                   </div>
                 </div>
 
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", fontSize: "13px", borderTop: "1px solid var(--border)", paddingTop: "14px" }}>
                   <div>
-                    <span style={{ color: "var(--muted)" }}>معرف الحملة الإعلانية (Campaign ID)</span>
-                    <code style={{ display: "block", marginTop: "4px", color: "var(--amber)", fontSize: "11.5px" }}>{selectedStrategy.meta_campaign_id || "act_demo_camp_123456"}</code>
+                    <span style={{ color: "var(--muted)" }}>معرف الحملة الإعلانية (Meta Campaign ID)</span>
+                    <code style={{ display: "block", marginTop: "4px", color: "var(--amber)", fontSize: "11.5px" }}>{selectedStrategy.meta_campaign_id}</code>
                   </div>
                   <div>
-                    <span style={{ color: "var(--muted)" }}>معرف الإعلان المشيد (Ad ID)</span>
-                    <code style={{ display: "block", marginTop: "4px", fontSize: "11.5px" }}>{selectedStrategy.meta_ad_id || "act_demo_ad_123456"}</code>
+                    <span style={{ color: "var(--muted)" }}>معرف الإعلان المشيد (Meta Ad ID)</span>
+                    <code style={{ display: "block", marginTop: "4px", fontSize: "11.5px" }}>{selectedStrategy.meta_ad_id || "—"}</code>
                   </div>
                 </div>
 
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", fontSize: "13px", borderTop: "1px solid var(--border)", paddingTop: "14px" }}>
                   <div>
-                    <span style={{ color: "var(--muted)" }}>الهدف والتوجيه (Objective)</span>
+                    <span style={{ color: "var(--muted)" }}>الهدف الإعلاني والتكامل</span>
                     <strong style={{ display: "block", marginTop: "4px" }}>{selectedStrategy.objective} / {selectedStrategy.optimization_goal}</strong>
                   </div>
                   <div>
-                    <span style={{ color: "var(--muted)" }}>الميزانية اليومية المخصصة</span>
+                    <span style={{ color: "var(--muted)" }}>الميزانية اليومية للذكاء الاصطناعي</span>
                     <strong className="ltr-val" style={{ display: "block", marginTop: "4px", fontSize: "14px" }}>${selectedStrategy.daily_budget} يومياً</strong>
                   </div>
                 </div>
 
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", fontSize: "13px", borderTop: "1px solid var(--border)", paddingTop: "14px" }}>
                   <div>
-                    <span style={{ color: "var(--muted)" }}>المواضع الإعلانية (Placements)</span>
+                    <span style={{ color: "var(--muted)" }}>المواضع الإعلانية النشطة</span>
                     <strong style={{ display: "block", marginTop: "4px" }}>{selectedStrategy.placements.join(", ") || "Advantage+ Placements"}</strong>
                   </div>
                   <div>
-                    <span style={{ color: "var(--muted)" }}>الجمهور المستهدف (Audience)</span>
+                    <span style={{ color: "var(--muted)" }}>توزيع الاستهداف والجمهور</span>
                     <strong style={{ display: "block", marginTop: "4px" }}>
                       {selectedStrategy.gender === "all" ? "الكل" : "إناث"} (عمر {selectedStrategy.age_min} - {selectedStrategy.age_max}) في {selectedStrategy.country_codes.join(", ")}
                     </strong>
@@ -440,14 +599,16 @@ export default function Page({ params }: PageProps) {
 
               {/* Action Sidebar */}
               <div className="panel" style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-                <h3 style={{ fontSize: "14px", fontWeight: "600", margin: 0 }}>موافقة ونشر</h3>
-                <p style={{ fontSize: "12.5px", color: "var(--muted)", lineHeight: "1.5" }}>
-                  الخطوة النهائية تتطلب الموافقة البشرية. تفعيل الحملة سيغير حالتها من PAUSED إلى ACTIVE على Facebook.
+                <h3 style={{ fontSize: "14px", fontWeight: "700", margin: 0 }}>خيارات التحكم والنشر</h3>
+                <p style={{ fontSize: "12.5px", color: "var(--muted)", lineHeight: "1.6" }}>
+                  تم تشييد الحملة بالكامل. يمكنك مراجعتها عبر حساب Meta Ads Manager أو الرجوع لبدء ترويج آخر.
                 </p>
 
                 <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                  <button
-                    disabled
+                  <a
+                    href={`https://adsmanager.facebook.com/adsmanager/manage/campaigns?act=${request.target_meta_account_id}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
                     className="sync-button"
                     style={{
                       justifyContent: "center",
@@ -456,29 +617,12 @@ export default function Page({ params }: PageProps) {
                       border: 0,
                       fontWeight: "700",
                       height: "40px",
-                      opacity: 0.4,
-                      cursor: "not-allowed"
+                      textDecoration: "none"
                     }}
                   >
-                    الموافقة والنشر (Approve & Publish)
-                  </button>
-
-                  <button
-                    disabled
-                    className="sync-button"
-                    style={{
-                      justifyContent: "center",
-                      background: "transparent",
-                      borderColor: "var(--red)",
-                      color: "var(--red)",
-                      fontWeight: "600",
-                      height: "40px",
-                      opacity: 0.4,
-                      cursor: "not-allowed"
-                    }}
-                  >
-                    رفض الحملة (Reject)
-                  </button>
+                    <ExternalLink size={14} style={{ marginLeft: "6px" }} />
+                    عرض الحملة على فيسبوك
+                  </a>
 
                   <button
                     onClick={() => router.push("/create-campaign")}
@@ -495,15 +639,160 @@ export default function Page({ params }: PageProps) {
                     العودة لمكتبة المحتوى
                   </button>
                 </div>
-
-                <div style={{ display: "flex", gap: "6px", fontSize: "11px", color: "var(--muted)", borderTop: "1px solid var(--border)", paddingTop: "12px" }}>
-                  <Info size={14} style={{ flexShrink: 0 }} />
-                  <span>أزرار التفعيل والرفض الإعلاني ستفعل عند إتمام إعداد نظام الموافقات البشرية والـ Webhook الخاص بـ WS-05.</span>
-                </div>
               </div>
             </div>
           </div>
         )}
+
+        {/* 4. AI Decision Transparency Section */}
+        {request.request_payload && (
+          <div className="panel" style={{ border: "1px solid var(--border)", background: "var(--surface)", display: "flex", flexDirection: "column", padding: "16px" }}>
+            <button
+              onClick={() => setIsDecisionOpen(!isDecisionOpen)}
+              style={{
+                width: "100%",
+                background: "transparent",
+                border: 0,
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                color: "var(--foreground)",
+                fontWeight: "700",
+                fontSize: "14px",
+                cursor: "pointer",
+                padding: "2px 0"
+              }}
+            >
+              <span style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <Sparkles size={16} style={{ color: "var(--green)" }} />
+                لماذا اختار الذكاء الاصطناعي هذه الاستراتيجية؟ (AI Decision Transparency)
+              </span>
+              <span style={{ fontSize: "12px", color: "var(--muted)" }}>
+                {isDecisionOpen ? "إخفاء التفاصيل ▲" : "عرض التفاصيل ▼"}
+              </span>
+            </button>
+
+            {isDecisionOpen && (
+              <div style={{ marginTop: "16px", borderTop: "1px solid var(--border)", paddingTop: "16px", display: "flex", flexDirection: "column", gap: "16px", fontSize: "13px" }}>
+                {request.request_payload.content_analysis && (
+                  <div style={{ display: "flex", gap: "10px", alignItems: "start" }}>
+                    <div style={{ width: "20px", height: "20px", borderRadius: "50%", background: "rgba(59,130,246,0.1)", display: "grid", placeItems: "center", color: "var(--blue)", fontSize: "10px", flexShrink: 0, marginTop: "2px" }}>١</div>
+                    <div>
+                      <strong style={{ display: "block", color: "var(--foreground)", marginBottom: "4px" }}>تحليل محتوى المنشور (Content Analysis):</strong>
+                      <span style={{ color: "var(--muted)", lineHeight: "1.5" }}>
+                        {request.request_payload.content_analysis.content_summary} (الهدف المكتشف: {request.request_payload.content_analysis.detected_goal})
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                {request.request_payload.historical_analysis && (
+                  <div style={{ display: "flex", gap: "10px", alignItems: "start" }}>
+                    <div style={{ width: "20px", height: "20px", borderRadius: "50%", background: "rgba(59,130,246,0.1)", display: "grid", placeItems: "center", color: "var(--blue)", fontSize: "10px", flexShrink: 0, marginTop: "2px" }}>٢</div>
+                    <div>
+                      <strong style={{ display: "block", color: "var(--foreground)", marginBottom: "4px" }}>التحليل التاريخي والمنصة (Historical Query):</strong>
+                      <span style={{ color: "var(--muted)", lineHeight: "1.5" }}>
+                        {request.request_payload.historical_analysis.recommendation} (الوضع الأفضل أداءً: {request.request_payload.historical_analysis.top_performing_placement})
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                {request.request_payload.audience_plan && (
+                  <div style={{ display: "flex", gap: "10px", alignItems: "start" }}>
+                    <div style={{ width: "20px", height: "20px", borderRadius: "50%", background: "rgba(59,130,246,0.1)", display: "grid", placeItems: "center", color: "var(--blue)", fontSize: "10px", flexShrink: 0, marginTop: "2px" }}>٣</div>
+                    <div>
+                      <strong style={{ display: "block", color: "var(--foreground)", marginBottom: "4px" }}>تخطيط الجمهور المستهدف (Audience Selection):</strong>
+                      <span style={{ color: "var(--muted)", lineHeight: "1.5" }}>
+                        {request.request_payload.audience_plan.target_demographics} - الاستهداف المقترح: {request.request_payload.audience_plan.targeting_approach}
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                {request.request_payload.budget_plan && (
+                  <div style={{ display: "flex", gap: "10px", alignItems: "start" }}>
+                    <div style={{ width: "20px", height: "20px", borderRadius: "50%", background: "rgba(59,130,246,0.1)", display: "grid", placeItems: "center", color: "var(--blue)", fontSize: "10px", flexShrink: 0, marginTop: "2px" }}>٤</div>
+                    <div>
+                      <strong style={{ display: "block", color: "var(--foreground)", marginBottom: "4px" }}>توزيع الموازنة والتقديرات المالية (Budgeting):</strong>
+                      <span style={{ color: "var(--muted)", lineHeight: "1.5" }}>
+                        الميزانية الموصى بها: {request.request_payload.budget_plan.recommended_daily_budget}$ يومياً. تقدير النتائج: {request.request_payload.budget_plan.estimated_conversion_range}
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                {request.request_payload.safety_review && (
+                  <div style={{ display: "flex", gap: "10px", alignItems: "start" }}>
+                    <div style={{ width: "20px", height: "20px", borderRadius: "50%", background: "rgba(59,130,246,0.1)", display: "grid", placeItems: "center", color: "var(--blue)", fontSize: "10px", flexShrink: 0, marginTop: "2px" }}>٥</div>
+                    <div>
+                      <strong style={{ display: "block", color: "var(--foreground)", marginBottom: "4px" }}>مراجعة الأمان والامتثال لسياسات Meta (Safety Check):</strong>
+                      <span style={{ color: "var(--muted)", lineHeight: "1.5" }}>
+                        النتيجة: {request.request_payload.safety_review.notes} (حالة الامتثال: {request.request_payload.safety_review.compliance_score}%)
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* 5. Campaign Technical Execution Timeline (Monospace Terminal Log) */}
+        <div className="panel" style={{ border: "1px solid var(--border)", background: "var(--surface)", display: "flex", flexDirection: "column", padding: "16px" }}>
+          <button
+            onClick={() => setIsLogOpen(!isLogOpen)}
+            style={{
+              width: "100%",
+              background: "transparent",
+              border: 0,
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              color: "var(--foreground)",
+              fontWeight: "700",
+              fontSize: "14px",
+              cursor: "pointer",
+              padding: "2px 0"
+            }}
+          >
+            <span style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <Terminal size={16} style={{ color: "var(--blue)" }} />
+              سجل العمليات التقني والتدقيق (Technical Execution Audit Log)
+            </span>
+            <span style={{ fontSize: "12px", color: "var(--muted)" }}>
+              {isLogOpen ? "إخفاء السجل ▲" : "عرض السجل ▼"}
+            </span>
+          </button>
+
+          {isLogOpen && (
+            <div style={{ marginTop: "16px", borderTop: "1px solid var(--border)", paddingTop: "16px" }}>
+              <div style={{ background: "#0d1117", border: "1px solid #21262d", borderRadius: "6px", padding: "14px", fontFamily: "monospace", fontSize: "12px", color: "#c9d1d9", direction: "ltr", textAlign: "left", display: "flex", flexDirection: "column", gap: "8px", maxHeight: "250px", overflowY: "auto" }}>
+                {timelineLogs.length === 0 ? (
+                  <div style={{ color: "var(--muted)", fontStyle: "italic" }}>No execution events logged yet.</div>
+                ) : (
+                  timelineLogs.map((log: any, idx: number) => {
+                    const time = new Date(log.timestamp).toLocaleTimeString();
+                    return (
+                      <div key={idx} style={{ display: "flex", gap: "10px" }}>
+                        <span style={{ color: "#8b949e" }}>[{time}]</span>
+                        <span style={{ color: "#58a6ff" }}>{log.event}</span>
+                        <span style={{ color: "#3fb950" }}>- Success</span>
+                      </div>
+                    );
+                  })
+                )}
+                {isBuildingActive && (
+                  <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+                    <span style={{ color: "#8b949e" }}>[{new Date().toLocaleTimeString()}]</span>
+                    <span style={{ color: "#e3b341" }}>Waiting for further updates...</span>
+                    <Loader2 size={12} className="animate-spin" style={{ color: "#e3b341" }} />
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
 
       </div>
     </Shell>

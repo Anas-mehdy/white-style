@@ -117,6 +117,7 @@ export async function POST(request: Request) {
       requested_daily_budget,
       execution_mode,
       placements,
+      expert_mode, // V2 field
     } = body;
 
     // Validate parameters depending on flow (content selection vs manual URL paste)
@@ -194,6 +195,13 @@ export async function POST(request: Request) {
         request_payload: payload,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
+        // V2 database columns
+        expert_mode: expert_mode || false,
+        created_by: expert_mode ? "human" : "ai",
+        selected_strategy: null,
+        execution_timeline: [
+          { event: "Request Created", timestamp: new Date().toISOString() }
+        ]
       };
       
       const supabase = await createClient();
@@ -261,6 +269,24 @@ export async function POST(request: Request) {
           { error: "لم يتم إرجاع معرف طلب صالح (UUID) من خادم n8n." },
           { status: 502 }
         );
+      }
+
+      // After successfully creating request in n8n, write V2 columns to Supabase
+      const supabase = await createClient();
+      try {
+        await supabase
+          .from("campaign_creation_requests")
+          .update({
+            expert_mode: expert_mode || false,
+            created_by: expert_mode ? "human" : "ai",
+            selected_strategy: null,
+            execution_timeline: [
+              { event: "Request Created", timestamp: new Date().toISOString() }
+            ]
+          } as any)
+          .eq("id", reqId);
+      } catch (err) {
+        console.error("Error setting V2 columns in DB:", err);
       }
 
       return NextResponse.json({

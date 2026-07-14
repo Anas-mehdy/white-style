@@ -231,6 +231,87 @@ export async function GET(
       return NextResponse.json({ error: strategiesError.message }, { status: 500 });
     }
 
+    // 4. Auto-append new execution timeline events
+    try {
+      const currentTimeline = requestData.execution_timeline || [];
+      const newEvents = [...currentTimeline];
+      
+      const hasEvent = (name: string) => newEvents.some((e: any) => e.event === name);
+      const addEvent = (name: string, timestamp = new Date().toISOString()) => {
+        if (!hasEvent(name)) {
+          newEvents.push({ event: name, timestamp });
+          return true;
+        }
+        return false;
+      };
+
+      let updated = false;
+
+      // Request Created
+      if (addEvent("Request Created", requestData.created_at)) updated = true;
+
+      const payload = requestData.request_payload || {};
+
+      // Content Analysis Completed
+      if (payload.content_analysis) {
+        if (addEvent("Content Analysis Completed", requestData.updated_at)) updated = true;
+      }
+      // Historical Analysis Completed
+      if (payload.historical_analysis) {
+        if (addEvent("Historical Analysis Completed", requestData.updated_at)) updated = true;
+      }
+      // Audience Planned
+      if (payload.audience_plan) {
+        if (addEvent("Audience Planned", requestData.updated_at)) updated = true;
+      }
+      // Budget Planned
+      if (payload.budget_plan) {
+        if (addEvent("Budget Planned", requestData.updated_at)) updated = true;
+      }
+      // Safety Approved
+      if (payload.safety_review) {
+        if (addEvent("Safety Approved", requestData.updated_at)) updated = true;
+      }
+
+      // Strategy Selected
+      const selectedStrat = strategies?.find((s: any) => s.selected === true);
+      if (selectedStrat || requestData.selected_strategy) {
+        if (addEvent("Strategy Selected", requestData.updated_at)) updated = true;
+      }
+
+      // Meta Campaign Created
+      if (selectedStrat?.meta_campaign_id) {
+        if (addEvent("Campaign Created", selectedStrat.updated_at || requestData.updated_at)) updated = true;
+      }
+      // Meta Ad Set Created
+      if (selectedStrat?.meta_adset_id) {
+        if (addEvent("Ad Set Created", selectedStrat.updated_at || requestData.updated_at)) updated = true;
+      }
+      // Meta Creative Uploaded
+      if (selectedStrat?.meta_creative_id) {
+        if (addEvent("Creative Uploaded", selectedStrat.updated_at || requestData.updated_at)) updated = true;
+      }
+      // Meta Advertisement Created
+      if (selectedStrat?.meta_ad_id) {
+        if (addEvent("Advertisement Created", selectedStrat.updated_at || requestData.updated_at)) updated = true;
+      }
+
+      // Campaign Running
+      if (requestData.status === "published" || requestData.status === "ready_for_review" || requestData.status === "approved") {
+        if (addEvent("Campaign Running", requestData.updated_at)) updated = true;
+      }
+
+      if (updated) {
+        requestData.execution_timeline = newEvents;
+        await supabase
+          .from("campaign_creation_requests")
+          .update({ execution_timeline: newEvents } as any)
+          .eq("id", requestId);
+      }
+    } catch (e) {
+      console.error("Failed to automatically update campaign execution timeline:", e);
+    }
+
     return NextResponse.json({
       request: requestData,
       strategies: strategies || [],

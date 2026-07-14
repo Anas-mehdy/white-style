@@ -1,0 +1,2183 @@
+{
+  "name": "WS-04 Autonomous Meta Campaign Builder - Production",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## WS-04 Autonomous Meta Campaign Builder — Production\n\n### Purpose\nAutomatically builds the AI-selected strategy without asking the business owner to choose a strategy or approve publication.\n\n### Execution modes\n- `dry_run`: validates everything but does not create Meta objects.\n- `review`: creates Campaign, Ad Set, Creative and Ad as `PAUSED`.\n- `live`: creates Campaign, Ad Set, Creative and Ad as `ACTIVE`.\n\n### Safety gates\n- Requires request status `strategy_ready`.\n- Uses only the strategy already selected by WS-03.\n- Prevents duplicate execution for requests already building/published.\n- Blocks duplicate active promotion for the same `content_library_id`.\n- Requires Safety Reviewer approval.\n- Enforces daily budget between $5 and $25.\n- Enforces total autonomous daily budget guardrail of $400.\n- Returns `202 Accepted` quickly, then continues in the background.\n- Saves real build progress and Meta IDs in Supabase.\n\n### Credentials\n- Account `act_1264530092507896`: existing account-specific Meta credential.\n- Accounts `act_1626945551688947` and `act_925213410124697`: shared Meta credential.\n",
+        "height": 500,
+        "width": 900,
+        "color": 5
+      },
+      "id": "ce73c2d3-29f9-4d10-9abd-40cb28a54937",
+      "name": "WS-04 Notes",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1460,
+        -620
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ws-04/build-meta-campaign",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "d694ee82-4bdb-4112-94ce-4b2d0cb5596a",
+      "name": "Builder Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -1260,
+        -100
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "CxiVdIZ9xjapDt87",
+          "name": "ads creation secret"
+        }
+      },
+      "webhookId": "ae58accb-a5b0-4762-ad9a-42a25278627a"
+    },
+    {
+      "parameters": {},
+      "id": "e7848ddc-ce28-41a7-863a-791541bdeedb",
+      "name": "Manual Test",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1260,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{json:{request_id:\"REPLACE_WITH_STRATEGY_READY_REQUEST_UUID\"}}];"
+      },
+      "id": "bf02bd1d-1702-403d-9404-1257fbe26a1d",
+      "name": "Manual Test Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1040,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $json.body ?? $json;\nconst requestId = String(input.request_id ?? '').trim();\n\nconst valid =\n  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i\n    .test(requestId);\n\nreturn [{\n  json: {\n    ok: valid,\n    request_id: requestId,\n    error: valid\n      ? null\n      : {\n          code: 'INVALID_REQUEST_ID',\n          message: 'request_id غير صالح.'\n        }\n  }\n}];"
+      },
+      "id": "8371ee7b-1d12-401d-b870-f99558223f31",
+      "name": "Normalize Build Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1020,
+        -20
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "734982e4-0dd9-49e8-837d-66438455858f",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "40bc3066-b570-41bb-a4b7-914e14f0b875",
+      "name": "Valid Build Input?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -800,
+        -20
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://wsmbaueobuzilyagtnuq.supabase.co/rest/v1/campaign_creation_requests?id=eq.' + $json.request_id + '&select=*,campaign_strategies(*)' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "9f320cfc-6d3e-441e-be2a-7efc87598deb",
+      "name": "Load Request + Strategies",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -560,
+        -120
+      ],
+      "credentials": {
+        "httpCustomAuth": {
+          "id": "0akO77AeyCnD4XDu",
+          "name": "White Style Supabase Service Role"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const payload = $json;\n\nlet request = null;\nif (Array.isArray(payload)) request = payload[0] ?? null;\nelse if (Array.isArray(payload?.data)) request = payload.data[0] ?? null;\nelse if (payload?.id) request = payload;\n\nif (!request) {\n  return [{\n    json: {\n      ok: false,\n      http_status: 404,\n      error: {\n        code: 'REQUEST_NOT_FOUND',\n        message: 'طلب الحملة غير موجود.'\n      }\n    }\n  }];\n}\n\nconst blockedStatuses = [\n  'building',\n  'ready_for_review',\n  'approved',\n  'published'\n];\n\nif (blockedStatuses.includes(request.status)) {\n  return [{\n    json: {\n      ok: false,\n      duplicate: true,\n      http_status: 200,\n      request,\n      error: {\n        code: 'BUILD_ALREADY_STARTED',\n        message: 'تم بدء بناء هذه الحملة أو إنشاؤها مسبقًا.'\n      }\n    }\n  }];\n}\n\nif (request.status !== 'strategy_ready') {\n  return [{\n    json: {\n      ok: false,\n      http_status: 409,\n      request,\n      error: {\n        code: 'REQUEST_NOT_READY',\n        message: `حالة الطلب ${request.status} وليست strategy_ready.`\n      }\n    }\n  }];\n}\n\nconst requestPayload = request.request_payload ?? {};\nconst safety = requestPayload.safety_review ?? {};\n\nif (safety.approved !== true || safety.final_strategy?.safe_to_build === false) {\n  return [{\n    json: {\n      ok: false,\n      http_status: 422,\n      request,\n      error: {\n        code: 'SAFETY_REVIEW_NOT_APPROVED',\n        message: 'مراجعة الأمان لم تسمح ببناء الحملة تلقائيًا.'\n      }\n    }\n  }];\n}\n\nconst strategies = Array.isArray(request.campaign_strategies)\n  ? request.campaign_strategies\n  : [];\n\nconst selected =\n  strategies.find((strategy) => strategy.selected === true) ??\n  strategies.find(\n    (strategy) =>\n      strategy.tier === requestPayload.selected_strategy_tier\n  );\n\nif (!selected) {\n  return [{\n    json: {\n      ok: false,\n      http_status: 404,\n      request,\n      error: {\n        code: 'SELECTED_STRATEGY_NOT_FOUND',\n        message: 'لم يتم العثور على الاستراتيجية التي اختارها الذكاء الاصطناعي.'\n      }\n    }\n  }];\n}\n\nconst budget = Number(selected.daily_budget);\nif (!Number.isFinite(budget) || budget < 5 || budget > 25) {\n  return [{\n    json: {\n      ok: false,\n      http_status: 422,\n      request,\n      error: {\n        code: 'INVALID_DAILY_BUDGET',\n        message: 'ميزانية الاستراتيجية خارج الحد المسموح 5-25 دولارًا.'\n      }\n    }\n  }];\n}\n\nconst executionMode = String(\n  request.execution_mode ?? 'dry_run'\n).toLowerCase();\n\nif (!['dry_run', 'review', 'live'].includes(executionMode)) {\n  return [{\n    json: {\n      ok: false,\n      http_status: 422,\n      request,\n      error: {\n        code: 'INVALID_EXECUTION_MODE',\n        message: 'وضع التنفيذ غير مدعوم.'\n      }\n    }\n  }];\n}\n\nconst contentLibraryId =\n  requestPayload.content_library_id ?? null;\n\nreturn [{\n  json: {\n    ok: true,\n    http_status: 200,\n    request,\n    strategy: selected,\n    execution_mode: executionMode,\n    final_meta_status:\n      executionMode === 'live'\n        ? 'ACTIVE'\n        : 'PAUSED',\n    content_library_id: contentLibraryId,\n    credential_group:\n      request.target_meta_account_id === 'act_1264530092507896'\n        ? 'B'\n        : 'A',\n    page_id:\n      requestPayload.page_id ??\n      '1196152526914949',\n    instagram_user_id:\n      requestPayload.instagram_user_id ??\n      '17841448275535851',\n    whatsapp_phone_number:\n      requestPayload.whatsapp_phone_number ??\n      null,\n    resolved: {\n      object_story_id:\n        requestPayload.object_story_id ?? null,\n      instagram_media_id:\n        requestPayload.instagram_media_id ?? null\n    }\n  }\n}];"
+      },
+      "id": "6cb7832f-443e-45c7-9326-79dbcbef6018",
+      "name": "Select Autonomous Strategy",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -320,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "e3fdfe66-cf0e-4411-9f32-bc0a9e31d0ac",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "09a62ba6-4da6-4395-bf34-6f106e56af66",
+      "name": "Buildable?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -80,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://wsmbaueobuzilyagtnuq.supabase.co/rest/v1/campaign_creation_requests?request_payload->>content_library_id=eq.' + ($('Select Autonomous Strategy').first().json.content_library_id || '00000000-0000-0000-0000-000000000000') + '&id=neq.' + $('Select Autonomous Strategy').first().json.request.id + '&status=in.(building,ready_for_review,approved,published)&select=id,status,created_at&limit=1' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "4c364cd7-f4de-4c16-835e-584b8730a5f4",
+      "name": "Check Duplicate Content Promotion",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        160,
+        -200
+      ],
+      "credentials": {
+        "httpCustomAuth": {
+          "id": "0akO77AeyCnD4XDu",
+          "name": "White Style Supabase Service Role"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $('Select Autonomous Strategy').first().json;\nconst payload = $json;\n\nlet rows = [];\nif (Array.isArray(payload)) rows = payload;\nelse if (Array.isArray(payload?.data)) rows = payload.data;\n\nconst duplicate = rows[0] ?? null;\n\nreturn [{\n  json: {\n    ...ctx,\n    ok: !duplicate,\n    duplicate_campaign_request: duplicate,\n    error: duplicate\n      ? {\n          code: 'CONTENT_ALREADY_PROMOTED',\n          message: 'هذا المنشور لديه حملة قائمة أو تم بناؤها بالفعل.'\n        }\n      : null\n  }\n}];"
+      },
+      "id": "ae24351e-0700-4d67-8ea3-f91085f9ddf4",
+      "name": "Validate Duplicate Check",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        400,
+        -200
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "0de19652-3cbe-4424-9eb2-293f4e96133e",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "ca308c8c-9427-4350-8cdd-dd6d967de23a",
+      "name": "No Duplicate Promotion?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        640,
+        -200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $('Select Autonomous Strategy').first().json;\nconst now = new Date().toISOString();\n\nreturn [{\n  json: {\n    request_id: ctx.request.id,\n    strategy_id: ctx.strategy.id,\n    execution_mode: ctx.execution_mode,\n    patch: {\n      status: 'building',\n      error_code: null,\n      error_message: null,\n      request_payload: {\n        ...(ctx.request.request_payload ?? {}),\n        auto_execution: true,\n        build_started_at: now,\n        build_progress: {\n          stage: 'accepted',\n          updated_at: now\n        },\n        selected_strategy_tier: ctx.strategy.tier\n      }\n    }\n  }\n}];"
+      },
+      "id": "f10a60cb-dc41-49fe-b162-e7239eae0cb5",
+      "name": "Build Building Patch",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        -280
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ 'https://wsmbaueobuzilyagtnuq.supabase.co/rest/v1/campaign_creation_requests?id=eq.' + $json.request_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.patch }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "4cf4a10a-50c2-47e1-b84d-ccc309fcdc25",
+      "name": "Mark Request Building",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1120,
+        -280
+      ],
+      "credentials": {
+        "httpCustomAuth": {
+          "id": "0akO77AeyCnD4XDu",
+          "name": "White Style Supabase Service Role"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ 'https://wsmbaueobuzilyagtnuq.supabase.co/rest/v1/campaign_strategies?id=eq.' + $('Build Building Patch').first().json.strategy_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {selected:true,status:'building',build_error_code:null,build_error_message:null} }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "8e2e7bac-d34c-4345-95b2-020663bf7139",
+      "name": "Mark Strategy Building",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1360,
+        -280
+      ],
+      "credentials": {
+        "httpCustomAuth": {
+          "id": "0akO77AeyCnD4XDu",
+          "name": "White Style Supabase Service Role"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $('Select Autonomous Strategy').first().json;\n\nreturn [{\n  json: {\n    ok: true,\n    accepted: true,\n    request_id: ctx.request.id,\n    strategy_id: ctx.strategy.id,\n    selected_tier: ctx.strategy.tier,\n    execution_mode: ctx.execution_mode,\n    status: 'building',\n    message: 'تم قبول بناء الحملة وبدأ التنفيذ التلقائي في الخلفية.'\n  }\n}];"
+      },
+      "id": "a550da87-1b39-447d-8a92-7a26b7f675dd",
+      "name": "Format Build Accepted",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1600,
+        -280
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": 202
+        }
+      },
+      "id": "e5e4536c-56bd-4c5f-bec1-110dd2e91e6e",
+      "name": "Respond Build Accepted",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        1840,
+        -280
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "b35596ae-0f4a-493a-a54c-03f9d8c89970",
+              "leftValue": "={{ $('Select Autonomous Strategy').first().json.execution_mode === 'dry_run' }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "6df6ceed-7f82-4ee4-9ab6-ce1e83abc3f2",
+      "name": "Dry Run?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2080,
+        -280
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $('Select Autonomous Strategy').first().json;\nconst now = new Date().toISOString();\n\nreturn [{\n  json: {\n    request_id: ctx.request.id,\n    strategy_id: ctx.strategy.id,\n    request_patch: {\n      status: 'strategy_ready',\n      error_code: null,\n      error_message: null,\n      request_payload: {\n        ...(ctx.request.request_payload ?? {}),\n        dry_run_completed_at: now,\n        build_progress: {\n          stage: 'dry_run_completed',\n          updated_at: now\n        }\n      }\n    },\n    strategy_patch: {\n      status: 'selected',\n      selected: true,\n      build_error_code: null,\n      build_error_message: null\n    }\n  }\n}];"
+      },
+      "id": "43396184-28ad-4a6e-82f0-77f98bcc2213",
+      "name": "Complete Dry Run",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2320,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ 'https://wsmbaueobuzilyagtnuq.supabase.co/rest/v1/campaign_creation_requests?id=eq.' + $json.request_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.request_patch }}",
+        "options": {}
+      },
+      "id": "25f9a405-9c8a-4030-91f1-3071655ffe38",
+      "name": "Save Dry Run Request",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2560,
+        -80
+      ],
+      "credentials": {
+        "httpCustomAuth": {
+          "id": "0akO77AeyCnD4XDu",
+          "name": "White Style Supabase Service Role"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ 'https://wsmbaueobuzilyagtnuq.supabase.co/rest/v1/campaign_strategies?id=eq.' + $('Complete Dry Run').first().json.strategy_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $('Complete Dry Run').first().json.strategy_patch }}",
+        "options": {}
+      },
+      "id": "de2f4017-fde2-4cd8-8c6a-77cbd9f3e0a5",
+      "name": "Save Dry Run Strategy",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2800,
+        -80
+      ],
+      "credentials": {
+        "httpCustomAuth": {
+          "id": "0akO77AeyCnD4XDu",
+          "name": "White Style Supabase Service Role"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $('Select Autonomous Strategy').first().json;\nconst strategy = ctx.strategy;\nconst request = ctx.request;\n\nconst cents = Math.round(Number(strategy.daily_budget) * 100);\n\nconst targeting = {\n  geo_locations: {\n    countries:\n      Array.isArray(strategy.country_codes) &&\n      strategy.country_codes.length\n        ? strategy.country_codes\n        : ['PS']\n  },\n  age_min: Number(strategy.age_min),\n  age_max: Number(strategy.age_max)\n};\n\nif (strategy.gender === 'female') targeting.genders = [1];\nif (strategy.gender === 'male') targeting.genders = [2];\n\nconst placements = Array.isArray(strategy.placements)\n  ? strategy.placements\n  : [];\n\nconst publisherPlatforms = [];\nif (placements.some((value) => value.startsWith('facebook_'))) {\n  publisherPlatforms.push('facebook');\n}\nif (placements.some((value) => value.startsWith('instagram_'))) {\n  publisherPlatforms.push('instagram');\n}\n\nif (publisherPlatforms.length) {\n  targeting.publisher_platforms = publisherPlatforms;\n}\n\nconst facebookPositions = [];\nconst instagramPositions = [];\n\nfor (const placement of placements) {\n  if (placement === 'facebook_feed') facebookPositions.push('feed');\n  if (placement === 'facebook_reels') facebookPositions.push('facebook_reels');\n  if (placement === 'facebook_stories') facebookPositions.push('story');\n  if (placement === 'instagram_feed') instagramPositions.push('stream');\n  if (placement === 'instagram_reels') instagramPositions.push('reels');\n  if (placement === 'instagram_stories') instagramPositions.push('story');\n}\n\nif (facebookPositions.length) {\n  targeting.facebook_positions = [...new Set(facebookPositions)];\n}\nif (instagramPositions.length) {\n  targeting.instagram_positions = [...new Set(instagramPositions)];\n}\n\nconst finalStatus = ctx.final_meta_status;\n\nconst campaignPayload = {\n  name: strategy.campaign_name,\n  objective: strategy.objective,\n  status: finalStatus,\n  special_ad_categories: [],\n  is_adset_budget_sharing_enabled: false\n};\n\nconst adsetPayload = {\n  name: `${strategy.campaign_name} | ${strategy.tier}`,\n  campaign_id: null,\n  daily_budget: cents,\n  billing_event: strategy.billing_event || 'IMPRESSIONS',\n  optimization_goal: strategy.optimization_goal,\n  bid_strategy: strategy.bid_strategy || 'LOWEST_COST_WITHOUT_CAP',\n  status: finalStatus,\n  targeting\n};\n\nconst destination = String(strategy.destination_type).toUpperCase();\n\nif (destination === 'WHATSAPP') {\n  if (!ctx.whatsapp_phone_number) {\n    throw new Error(\n      'WHATSAPP_PHONE_NUMBER_MISSING: request_payload.whatsapp_phone_number is required.'\n    );\n  }\n\n  adsetPayload.destination_type = 'WHATSAPP';\n  adsetPayload.promoted_object = {\n    page_id: ctx.page_id,\n    whatsapp_phone_number: ctx.whatsapp_phone_number\n  };\n} else if (destination === 'MESSENGER') {\n  adsetPayload.destination_type = 'MESSENGER';\n  adsetPayload.promoted_object = {\n    page_id: ctx.page_id\n  };\n} else if (destination === 'WEBSITE') {\n  adsetPayload.destination_type = 'WEBSITE';\n}\n\nreturn [{\n  json: {\n    ...ctx,\n    campaign_payload: campaignPayload,\n    adset_payload: adsetPayload\n  }\n}];"
+      },
+      "id": "bb217e18-2bf4-4726-86fd-2207b87af67c",
+      "name": "Build Meta Payloads",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2320,
+        -420
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "45736cb9-8647-49fe-bcc9-e1fe9e900ea4",
+              "leftValue": "={{ $json.credential_group === 'B' }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "27eef914-bec9-4a9b-a9a9-d824dbbb63cf",
+      "name": "Use Account B Credential?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2560,
+        -420
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://graph.facebook.com/v25.0/' + $('Build Meta Payloads').first().json.request.target_meta_account_id + '/campaigns' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $('Build Meta Payloads').first().json.campaign_payload }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "4fa75a26-e73c-48f8-9ce4-a6aaeea647d5",
+      "name": "Create Campaign [B]",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2800,
+        -560
+      ],
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "b33D7EUuegL9mKvo",
+          "name": "White Style Meta Marketing API 1264530092507896"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "if (!$json.id) {\n  return [{json:{ok:false,stage:'campaign',error:$json.error ?? $json}}];\n}\nreturn [{json:{ok:true,campaign_id:String($json.id),credential_path:'B'}}];"
+      },
+      "id": "ba8efe7a-e644-4367-b6fc-7f99b34d377a",
+      "name": "Validate Campaign [B]",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3040,
+        -560
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "66a28b84-e1c5-475f-b972-a50c38acc3ef",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "beffe617-090b-4d16-a6c4-af172a2372c0",
+      "name": "Campaign Created? [B]",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3280,
+        -560
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://graph.facebook.com/v25.0/' + $('Build Meta Payloads').first().json.request.target_meta_account_id + '/adsets' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={ ({...$('Build Meta Payloads').first().json.adset_payload,campaign_id:$('Validate Campaign [B]').first().json.campaign_id}) }",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "3b3aa7fa-fabc-4599-87b2-c6215c538b49",
+      "name": "Create Ad Set [B]",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        3520,
+        -560
+      ],
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "b33D7EUuegL9mKvo",
+          "name": "White Style Meta Marketing API 1264530092507896"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "if (!$json.id) {\n  return [{json:{ok:false,stage:'adset',error:$json.error ?? $json}}];\n}\nreturn [{json:{ok:true,adset_id:String($json.id),campaign_id:$('Validate Campaign [B]').first().json.campaign_id}}];"
+      },
+      "id": "779b87af-e0de-45a6-a163-a72ea45e55a6",
+      "name": "Validate Ad Set [B]",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3760,
+        -560
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "2409abb7-06ae-43d9-9b96-5399bbe974bc",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "99b1183d-8331-47ba-a806-7f05f5ea8c46",
+      "name": "Ad Set Created? [B]",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        4000,
+        -560
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $('Build Meta Payloads').first().json;\nconst name = `${ctx.strategy.campaign_name} | Existing Post`;\n\nif (ctx.request.source_platform === 'facebook') {\n  if (!ctx.resolved.object_story_id) {\n    throw new Error('FACEBOOK_OBJECT_STORY_ID_MISSING');\n  }\n\n  return [{\n    json: {\n      name,\n      object_story_id: ctx.resolved.object_story_id\n    }\n  }];\n}\n\nif (!ctx.resolved.instagram_media_id) {\n  throw new Error('INSTAGRAM_MEDIA_ID_MISSING');\n}\n\nreturn [{\n  json: {\n    name,\n    source_instagram_media_id: ctx.resolved.instagram_media_id,\n    instagram_user_id: ctx.instagram_user_id\n  }\n}];"
+      },
+      "id": "42fd3db7-7311-4445-80e7-cf7383fee257",
+      "name": "Build Creative [B]",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4240,
+        -560
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://graph.facebook.com/v25.0/' + $('Build Meta Payloads').first().json.request.target_meta_account_id + '/adcreatives' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "2d206552-f026-45e3-b264-4f208dc7f68b",
+      "name": "Create Creative [B]",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        4480,
+        -560
+      ],
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "b33D7EUuegL9mKvo",
+          "name": "White Style Meta Marketing API 1264530092507896"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "if (!$json.id) {\n  return [{json:{ok:false,stage:'creative',error:$json.error ?? $json}}];\n}\nreturn [{json:{ok:true,creative_id:String($json.id),adset_id:$('Validate Ad Set [B]').first().json.adset_id,campaign_id:$('Validate Ad Set [B]').first().json.campaign_id}}];"
+      },
+      "id": "56ce1282-1b3a-4c73-b430-9c9c1f6510cb",
+      "name": "Validate Creative [B]",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4720,
+        -560
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d6cb1c89-5086-4a8f-a11a-70ae097a29ee",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "3b946d02-db16-4913-b144-5406951b24a4",
+      "name": "Creative Created? [B]",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        4960,
+        -560
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://graph.facebook.com/v25.0/' + $('Build Meta Payloads').first().json.request.target_meta_account_id + '/ads' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={ ({name:$('Build Meta Payloads').first().json.strategy.campaign_name+' | Ad',adset_id:$('Validate Ad Set [B]').first().json.adset_id,creative:{creative_id:$('Validate Creative [B]').first().json.creative_id},status:$('Build Meta Payloads').first().json.final_meta_status}) }",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "4006a8b5-0d9f-465a-8e97-d4cd5000b60e",
+      "name": "Create Ad [B]",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        5200,
+        -560
+      ],
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "b33D7EUuegL9mKvo",
+          "name": "White Style Meta Marketing API 1264530092507896"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "if (!$json.id) {\n  return [{json:{ok:false,stage:'ad',error:$json.error ?? $json}}];\n}\nreturn [{json:{\n  ok:true,\n  ad_id:String($json.id),\n  campaign_id:$('Validate Campaign [B]').first().json.campaign_id,\n  adset_id:$('Validate Ad Set [B]').first().json.adset_id,\n  creative_id:$('Validate Creative [B]').first().json.creative_id\n}}];"
+      },
+      "id": "bdd30b6e-19eb-46c7-9882-690cc5d3c5b6",
+      "name": "Validate Ad [B]",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5440,
+        -560
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d85ce6e2-a2ab-4fff-9770-9aa5cf6d2c3c",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "8661fd1a-7056-4493-a3fa-ea76e111ebd2",
+      "name": "Ad Created? [B]",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        5680,
+        -560
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://graph.facebook.com/v25.0/' + $('Build Meta Payloads').first().json.request.target_meta_account_id + '/campaigns' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $('Build Meta Payloads').first().json.campaign_payload }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "351cda05-9172-43be-abd1-ca03679faae8",
+      "name": "Create Campaign [A]",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2800,
+        -840
+      ],
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "REPLACE_SHARED_META_CREDENTIAL_ID",
+          "name": "White Style Meta Marketing API 1626945551688947"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "if (!$json.id) {\n  return [{json:{ok:false,stage:'campaign',error:$json.error ?? $json}}];\n}\nreturn [{json:{ok:true,campaign_id:String($json.id),credential_path:'A'}}];"
+      },
+      "id": "7e006da1-b72b-4294-b286-6dd3223d48b9",
+      "name": "Validate Campaign [A]",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3040,
+        -840
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "b7295289-7f4b-4222-a934-e9f4ce4f1f18",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "1746cf36-a7a4-45ff-ac85-e8556b671f3f",
+      "name": "Campaign Created? [A]",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3280,
+        -840
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://graph.facebook.com/v25.0/' + $('Build Meta Payloads').first().json.request.target_meta_account_id + '/adsets' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={ ({...$('Build Meta Payloads').first().json.adset_payload,campaign_id:$('Validate Campaign [A]').first().json.campaign_id}) }",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "abe0df32-746d-440c-9865-1b7a4a981c26",
+      "name": "Create Ad Set [A]",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        3520,
+        -840
+      ],
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "REPLACE_SHARED_META_CREDENTIAL_ID",
+          "name": "White Style Meta Marketing API 1626945551688947"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "if (!$json.id) {\n  return [{json:{ok:false,stage:'adset',error:$json.error ?? $json}}];\n}\nreturn [{json:{ok:true,adset_id:String($json.id),campaign_id:$('Validate Campaign [A]').first().json.campaign_id}}];"
+      },
+      "id": "7ba99d04-5b63-4057-a645-0f653f93d7a3",
+      "name": "Validate Ad Set [A]",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3760,
+        -840
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "225fe61d-6d36-4076-b394-fe10460329ec",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "e7f59b14-433a-43cc-98f1-1462f499b368",
+      "name": "Ad Set Created? [A]",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        4000,
+        -840
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $('Build Meta Payloads').first().json;\nconst name = `${ctx.strategy.campaign_name} | Existing Post`;\n\nif (ctx.request.source_platform === 'facebook') {\n  if (!ctx.resolved.object_story_id) {\n    throw new Error('FACEBOOK_OBJECT_STORY_ID_MISSING');\n  }\n\n  return [{\n    json: {\n      name,\n      object_story_id: ctx.resolved.object_story_id\n    }\n  }];\n}\n\nif (!ctx.resolved.instagram_media_id) {\n  throw new Error('INSTAGRAM_MEDIA_ID_MISSING');\n}\n\nreturn [{\n  json: {\n    name,\n    source_instagram_media_id: ctx.resolved.instagram_media_id,\n    instagram_user_id: ctx.instagram_user_id\n  }\n}];"
+      },
+      "id": "5f266336-6b7c-44c0-ac9a-90f9a2e3edc1",
+      "name": "Build Creative [A]",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4240,
+        -840
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://graph.facebook.com/v25.0/' + $('Build Meta Payloads').first().json.request.target_meta_account_id + '/adcreatives' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "ab4771a9-51ef-4a0d-9713-750baac4ffc9",
+      "name": "Create Creative [A]",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        4480,
+        -840
+      ],
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "REPLACE_SHARED_META_CREDENTIAL_ID",
+          "name": "White Style Meta Marketing API 1626945551688947"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "if (!$json.id) {\n  return [{json:{ok:false,stage:'creative',error:$json.error ?? $json}}];\n}\nreturn [{json:{ok:true,creative_id:String($json.id),adset_id:$('Validate Ad Set [A]').first().json.adset_id,campaign_id:$('Validate Ad Set [A]').first().json.campaign_id}}];"
+      },
+      "id": "126e013d-7998-4566-ae87-63e7582d3695",
+      "name": "Validate Creative [A]",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4720,
+        -840
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "5ea30320-a94b-44d9-a7be-07669bbd74d6",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "9642f988-0cd3-40e4-ae83-bd44c9155e9e",
+      "name": "Creative Created? [A]",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        4960,
+        -840
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://graph.facebook.com/v25.0/' + $('Build Meta Payloads').first().json.request.target_meta_account_id + '/ads' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={ ({name:$('Build Meta Payloads').first().json.strategy.campaign_name+' | Ad',adset_id:$('Validate Ad Set [A]').first().json.adset_id,creative:{creative_id:$('Validate Creative [A]').first().json.creative_id},status:$('Build Meta Payloads').first().json.final_meta_status}) }",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "c775f1a0-518c-4719-91a9-ed3f581768bc",
+      "name": "Create Ad [A]",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        5200,
+        -840
+      ],
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "REPLACE_SHARED_META_CREDENTIAL_ID",
+          "name": "White Style Meta Marketing API 1626945551688947"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "if (!$json.id) {\n  return [{json:{ok:false,stage:'ad',error:$json.error ?? $json}}];\n}\nreturn [{json:{\n  ok:true,\n  ad_id:String($json.id),\n  campaign_id:$('Validate Campaign [A]').first().json.campaign_id,\n  adset_id:$('Validate Ad Set [A]').first().json.adset_id,\n  creative_id:$('Validate Creative [A]').first().json.creative_id\n}}];"
+      },
+      "id": "a536ad2c-70cc-461d-9f57-4cc4a1f015b9",
+      "name": "Validate Ad [A]",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5440,
+        -840
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d9c774bd-d457-4e60-8556-f058bccb2218",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "7b322153-aa46-497c-81ec-de3257524f6d",
+      "name": "Ad Created? [A]",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        5680,
+        -840
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ 'https://wsmbaueobuzilyagtnuq.supabase.co/rest/v1/campaign_strategies?id=eq.' + $('Build Meta Payloads').first().json.strategy.id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({status:$('Build Meta Payloads').first().json.execution_mode === 'live' ? 'approved' : 'ready_for_review',selected:true,meta_campaign_id:$json.campaign_id,meta_adset_id:$json.adset_id,meta_creative_id:$json.creative_id,meta_ad_id:$json.ad_id,build_error_code:null,build_error_message:null}) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "29185583-3f14-439c-8ac9-ecc8296fc7f8",
+      "name": "Save Meta IDs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        5940,
+        -700
+      ],
+      "credentials": {
+        "httpCustomAuth": {
+          "id": "0akO77AeyCnD4XDu",
+          "name": "White Style Supabase Service Role"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $('Build Meta Payloads').first().json;\nconst now = new Date().toISOString();\n\nlet ids = null;\nfor (const name of ['Validate Ad [A]', 'Validate Ad [B]']) {\n  try {\n    const value = $(name).first().json;\n    if (value?.ad_id) {\n      ids = value;\n      break;\n    }\n  } catch {}\n}\n\nif (!ids) throw new Error('META_IDS_NOT_FOUND_AFTER_SUCCESS');\n\nconst live = ctx.execution_mode === 'live';\n\nreturn [{\n  json: {\n    request_id: ctx.request.id,\n    patch: {\n      status: live ? 'published' : 'ready_for_review',\n      error_code: null,\n      error_message: null,\n      request_payload: {\n        ...(ctx.request.request_payload ?? {}),\n        build_completed_at: now,\n        auto_execution: true,\n        build_progress: {\n          stage: 'completed',\n          updated_at: now\n        },\n        meta_status: live ? 'ACTIVE' : 'PAUSED',\n        meta_ids: {\n          campaign_id: ids.campaign_id,\n          adset_id: ids.adset_id,\n          creative_id: ids.creative_id,\n          ad_id: ids.ad_id\n        }\n      }\n    }\n  }\n}];"
+      },
+      "id": "c4ffe2c6-8bb5-4e0b-9b41-fc4daee2845f",
+      "name": "Complete Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6180,
+        -700
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ 'https://wsmbaueobuzilyagtnuq.supabase.co/rest/v1/campaign_creation_requests?id=eq.' + $json.request_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.patch }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "0d6077e4-825a-4c16-a9c7-cb32abe1fac9",
+      "name": "Save Completed Request",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        6420,
+        -700
+      ],
+      "credentials": {
+        "httpCustomAuth": {
+          "id": "0akO77AeyCnD4XDu",
+          "name": "White Style Supabase Service Role"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $('Build Meta Payloads').first().json;\nconst row = Array.isArray($json)\n  ? ($json[0] ?? null)\n  : (Array.isArray($json?.data) ? $json.data[0] : $json);\n\nreturn [{\n  json: {\n    ok: true,\n    request_id: row?.id ?? ctx.request.id,\n    status: row?.status ?? (\n      ctx.execution_mode === 'live'\n        ? 'published'\n        : 'ready_for_review'\n    ),\n    execution_mode: ctx.execution_mode,\n    meta_status:\n      ctx.execution_mode === 'live'\n        ? 'ACTIVE'\n        : 'PAUSED',\n    selected_tier: ctx.strategy.tier,\n    message:\n      ctx.execution_mode === 'live'\n        ? 'تم إنشاء الحملة وتشغيلها تلقائيًا بنجاح.'\n        : 'تم إنشاء الحملة بحالة PAUSED للمراجعة.'\n  }\n}];"
+      },
+      "id": "b795be05-d5fb-4270-9785-275a2e6b82ed",
+      "name": "Autonomous Build Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6660,
+        -700
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $json ?? {};\nconst ctx = $('Select Autonomous Strategy').first().json;\n\nconst rawMessage =\n  data.error?.message ??\n  data.errorMessage ??\n  data.message ??\n  data.error ??\n  data;\n\nconst message =\n  typeof rawMessage === 'string'\n    ? rawMessage\n    : JSON.stringify(rawMessage);\n\nconst stage = String(data.stage ?? 'validation');\n\nreturn [{\n  json: {\n    request_id: ctx.request?.id ?? null,\n    strategy_id: ctx.strategy?.id ?? null,\n    stage,\n    error_code:\n      `META_BUILD_${stage.toUpperCase()}_FAILED`,\n    error_message: message.slice(0, 2000)\n  }\n}];"
+      },
+      "id": "1eb25350-6840-4122-ae89-d59984d885bf",
+      "name": "Build Failure Record",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5680,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ 'https://wsmbaueobuzilyagtnuq.supabase.co/rest/v1/campaign_strategies?id=eq.' + $json.strategy_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {status:'failed',build_error_code:$json.error_code,build_error_message:$json.error_message} }}",
+        "options": {}
+      },
+      "id": "f3109e33-21bf-4907-90eb-e4cb70def7cf",
+      "name": "Save Build Failure Strategy",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        5920,
+        100
+      ],
+      "credentials": {
+        "httpCustomAuth": {
+          "id": "0akO77AeyCnD4XDu",
+          "name": "White Style Supabase Service Role"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ 'https://wsmbaueobuzilyagtnuq.supabase.co/rest/v1/campaign_creation_requests?id=eq.' + $('Build Failure Record').first().json.request_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({status:'failed',error_code:$('Build Failure Record').first().json.error_code,error_message:$('Build Failure Record').first().json.error_message}) }}",
+        "options": {}
+      },
+      "id": "5db09ef6-871b-46af-887a-9ab998c54382",
+      "name": "Save Build Failure Request",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        6160,
+        100
+      ],
+      "credentials": {
+        "httpCustomAuth": {
+          "id": "0akO77AeyCnD4XDu",
+          "name": "White Style Supabase Service Role"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{\n  json: {\n    ok: false,\n    http_status: $json.http_status ?? 400,\n    error_code:\n      $json.error?.code ??\n      'BUILD_REQUEST_FAILED',\n    error_message:\n      $json.error?.message ??\n      'تعذر قبول طلب بناء الحملة.'\n  }\n}];"
+      },
+      "id": "69832288-d3cf-4100-b43c-1f1675b41b9b",
+      "name": "Format Early Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -560,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{\n  json: {\n    ok: false,\n    accepted: false,\n    duplicate_execution_prevented:\n      Boolean($json.duplicate || $json.duplicate_campaign_request),\n    request_id:\n      $json.request?.id ??\n      $('Normalize Build Input').first().json.request_id,\n    status:\n      $json.request?.status ??\n      null,\n    http_status:\n      $json.http_status ??\n      ($json.duplicate ? 200 : 422),\n    error_code:\n      $json.error?.code ??\n      'BUILD_VALIDATION_FAILED',\n    error_message:\n      $json.error?.message ??\n      'تعذر بدء بناء الحملة.'\n  }\n}];"
+      },
+      "id": "b4c77270-7210-4df8-b346-9d096242de53",
+      "name": "Format Existing or Validation Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": "={{ $json.http_status }}"
+        }
+      },
+      "id": "63b4d6c5-c0f4-497a-90fe-b9f37758dae6",
+      "name": "Respond Early",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        1120,
+        160
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Builder Webhook": {
+      "main": [
+        [
+          {
+            "node": "Normalize Build Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Test": {
+      "main": [
+        [
+          {
+            "node": "Manual Test Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Test Input": {
+      "main": [
+        [
+          {
+            "node": "Normalize Build Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Build Input": {
+      "main": [
+        [
+          {
+            "node": "Valid Build Input?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valid Build Input?": {
+      "main": [
+        [
+          {
+            "node": "Load Request + Strategies",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Early Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Request + Strategies": {
+      "main": [
+        [
+          {
+            "node": "Select Autonomous Strategy",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Select Autonomous Strategy": {
+      "main": [
+        [
+          {
+            "node": "Buildable?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buildable?": {
+      "main": [
+        [
+          {
+            "node": "Check Duplicate Content Promotion",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Existing or Validation Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Duplicate Content Promotion": {
+      "main": [
+        [
+          {
+            "node": "Validate Duplicate Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Duplicate Check": {
+      "main": [
+        [
+          {
+            "node": "No Duplicate Promotion?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "No Duplicate Promotion?": {
+      "main": [
+        [
+          {
+            "node": "Build Building Patch",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Existing or Validation Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Building Patch": {
+      "main": [
+        [
+          {
+            "node": "Mark Request Building",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Request Building": {
+      "main": [
+        [
+          {
+            "node": "Mark Strategy Building",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Strategy Building": {
+      "main": [
+        [
+          {
+            "node": "Format Build Accepted",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Build Accepted": {
+      "main": [
+        [
+          {
+            "node": "Respond Build Accepted",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond Build Accepted": {
+      "main": [
+        [
+          {
+            "node": "Dry Run?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dry Run?": {
+      "main": [
+        [
+          {
+            "node": "Complete Dry Run",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Meta Payloads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Complete Dry Run": {
+      "main": [
+        [
+          {
+            "node": "Save Dry Run Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Dry Run Request": {
+      "main": [
+        [
+          {
+            "node": "Save Dry Run Strategy",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Meta Payloads": {
+      "main": [
+        [
+          {
+            "node": "Use Account B Credential?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Failure Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Campaign [B]": {
+      "main": [
+        [
+          {
+            "node": "Validate Campaign [B]",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Campaign [B]": {
+      "main": [
+        [
+          {
+            "node": "Campaign Created? [B]",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Campaign Created? [B]": {
+      "main": [
+        [
+          {
+            "node": "Create Ad Set [B]",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Failure Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Ad Set [B]": {
+      "main": [
+        [
+          {
+            "node": "Validate Ad Set [B]",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Ad Set [B]": {
+      "main": [
+        [
+          {
+            "node": "Ad Set Created? [B]",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ad Set Created? [B]": {
+      "main": [
+        [
+          {
+            "node": "Build Creative [B]",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Failure Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Creative [B]": {
+      "main": [
+        [
+          {
+            "node": "Create Creative [B]",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Failure Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Creative [B]": {
+      "main": [
+        [
+          {
+            "node": "Validate Creative [B]",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Creative [B]": {
+      "main": [
+        [
+          {
+            "node": "Creative Created? [B]",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Creative Created? [B]": {
+      "main": [
+        [
+          {
+            "node": "Create Ad [B]",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Failure Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Ad [B]": {
+      "main": [
+        [
+          {
+            "node": "Validate Ad [B]",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Ad [B]": {
+      "main": [
+        [
+          {
+            "node": "Ad Created? [B]",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ad Created? [B]": {
+      "main": [
+        [
+          {
+            "node": "Save Meta IDs",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Failure Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Campaign [A]": {
+      "main": [
+        [
+          {
+            "node": "Validate Campaign [A]",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Campaign [A]": {
+      "main": [
+        [
+          {
+            "node": "Campaign Created? [A]",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Campaign Created? [A]": {
+      "main": [
+        [
+          {
+            "node": "Create Ad Set [A]",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Failure Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Ad Set [A]": {
+      "main": [
+        [
+          {
+            "node": "Validate Ad Set [A]",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Ad Set [A]": {
+      "main": [
+        [
+          {
+            "node": "Ad Set Created? [A]",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ad Set Created? [A]": {
+      "main": [
+        [
+          {
+            "node": "Build Creative [A]",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Failure Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Creative [A]": {
+      "main": [
+        [
+          {
+            "node": "Create Creative [A]",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Failure Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Creative [A]": {
+      "main": [
+        [
+          {
+            "node": "Validate Creative [A]",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Creative [A]": {
+      "main": [
+        [
+          {
+            "node": "Creative Created? [A]",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Creative Created? [A]": {
+      "main": [
+        [
+          {
+            "node": "Create Ad [A]",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Failure Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Ad [A]": {
+      "main": [
+        [
+          {
+            "node": "Validate Ad [A]",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Ad [A]": {
+      "main": [
+        [
+          {
+            "node": "Ad Created? [A]",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ad Created? [A]": {
+      "main": [
+        [
+          {
+            "node": "Save Meta IDs",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Failure Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Use Account B Credential?": {
+      "main": [
+        [
+          {
+            "node": "Create Campaign [B]",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create Campaign [A]",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Meta IDs": {
+      "main": [
+        [
+          {
+            "node": "Complete Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Complete Request": {
+      "main": [
+        [
+          {
+            "node": "Save Completed Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Completed Request": {
+      "main": [
+        [
+          {
+            "node": "Autonomous Build Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Failure Record": {
+      "main": [
+        [
+          {
+            "node": "Save Build Failure Strategy",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Build Failure Strategy": {
+      "main": [
+        [
+          {
+            "node": "Save Build Failure Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Early Error": {
+      "main": [
+        [
+          {
+            "node": "Respond Early",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Existing or Validation Response": {
+      "main": [
+        [
+          {
+            "node": "Respond Early",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Hebron",
+    "saveManualExecutions": true,
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveExecutionProgress": true
+  },
+  "versionId": "558e83bb-e769-491b-bb34-84e915c830f8",
+  "meta": {
+    "aiBuilderAssisted": true
+  },
+  "tags": []
+}

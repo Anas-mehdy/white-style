@@ -48,15 +48,14 @@ export function RecentRequests({ requests, onSelectRequest, activeRequestId }: R
           <table>
             <thead>
               <tr>
-                <th>المحتوى</th>
-                <th>المنصة</th>
-                <th>الحساب الإعلاني</th>
-                <th>الوجهة المستهدفة</th>
-                <th>الميزانية</th>
+                <th style={{ width: "60px" }}>الصورة</th>
+                <th>النص</th>
+                <th>الحالة الداخلية</th>
+                <th>الاستراتيجية المختارة</th>
                 <th>وضع التنفيذ</th>
-                <th>الحالة</th>
-                <th>تاريخ الطلب</th>
-                <th>الإجراء</th>
+                <th>حالة Meta</th>
+                <th>أنشئ بواسطة</th>
+                <th style={{ width: "100px" }}>الإجراء</th>
               </tr>
             </thead>
             <tbody>
@@ -69,7 +68,46 @@ export function RecentRequests({ requests, onSelectRequest, activeRequestId }: R
                 const thumbnail = context.thumbnail_url;
                 const caption = context.caption || req.source_post_url;
                 const permalink = context.permalink || req.source_post_url;
-                const platform = req.source_platform || (req.source_post_url?.includes("instagram") ? "instagram" : "facebook");
+                
+                // 4. Find selected strategy
+                const strategies = (req as any).campaign_strategies || [];
+                const selectedStrat = strategies.find((s: any) => s.selected === true);
+                let strategyText = "—";
+                if (selectedStrat) {
+                  if (selectedStrat.tier === "conservative") strategyText = "محافظ (Conservative)";
+                  else if (selectedStrat.tier === "balanced") strategyText = "متوازن (Balanced)";
+                  else if (selectedStrat.tier === "aggressive") strategyText = "هجومي (Aggressive)";
+                } else if (req.selected_strategy) {
+                  if (req.selected_strategy === "conservative") strategyText = "محافظ (Conservative)";
+                  else if (req.selected_strategy === "balanced") strategyText = "متوازن (Balanced)";
+                  else if (req.selected_strategy === "aggressive") strategyText = "هجومي (Aggressive)";
+                }
+
+                // 6. Meta Status
+                let metaStatusText = "—";
+                let metaStatusCls = "badge--neutral";
+                if (selectedStrat) {
+                  if (selectedStrat.status === "built_paused") {
+                    metaStatusText = "موقوف مؤقتاً (Built Paused)";
+                    metaStatusCls = "badge--warning";
+                  } else if (selectedStrat.status === "published" || req.status === "published") {
+                    metaStatusText = "نشط (Active)";
+                    metaStatusCls = "badge--success";
+                  } else if (selectedStrat.status === "failed") {
+                    metaStatusText = "فشل البناء";
+                    metaStatusCls = "badge--failed";
+                  }
+                } else if (req.status === "published") {
+                  metaStatusText = "نشط (Active)";
+                  metaStatusCls = "badge--success";
+                } else if (req.status === "ready_for_review" || req.status === "approved") {
+                  metaStatusText = "موقوف مؤقتاً (Built Paused)";
+                  metaStatusCls = "badge--warning";
+                }
+
+                // 7. Created By
+                const isHuman = req.expert_mode === true;
+                const createdByText = isHuman ? "👤 Human" : "🤖 AI";
 
                 return (
                   <tr
@@ -79,83 +117,58 @@ export function RecentRequests({ requests, onSelectRequest, activeRequestId }: R
                     }}
                   >
                     <td>
-                      <div style={{ display: "flex", gap: "10px", alignItems: "center", maxWidth: "250px" }}>
-                        {thumbnail ? (
-                          <div style={{ width: "36px", height: "36px", borderRadius: "4px", overflow: "hidden", flexShrink: 0, background: "rgba(0,0,0,0.2)" }}>
-                            <img
-                              src={thumbnail}
-                              alt="thumbnail"
-                              onError={(e) => {
-                                e.currentTarget.style.display = "none";
-                              }}
-                              style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                            />
-                          </div>
-                        ) : (
-                          <div style={{ width: "36px", height: "36px", borderRadius: "4px", display: "grid", placeItems: "center", flexShrink: 0, background: "rgba(255,255,255,0.02)", border: "1px solid var(--border)", color: "var(--muted)" }}>
-                            <ImageIcon size={14} />
-                          </div>
-                        )}
-                        <div style={{ display: "flex", flexDirection: "column", gap: "2px", overflow: "hidden" }}>
-                          <span
+                      {thumbnail ? (
+                        <div style={{ width: "40px", height: "40px", borderRadius: "4px", overflow: "hidden", background: "rgba(0,0,0,0.2)" }}>
+                          <img
+                            src={thumbnail}
+                            alt="thumbnail"
+                            onError={(e) => {
+                              e.currentTarget.style.display = "none";
+                            }}
+                            style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                          />
+                        </div>
+                      ) : (
+                        <div style={{ width: "40px", height: "40px", borderRadius: "4px", display: "grid", placeItems: "center", background: "rgba(255,255,255,0.02)", border: "1px solid var(--border)", color: "var(--muted)" }}>
+                          <ImageIcon size={14} />
+                        </div>
+                      )}
+                    </td>
+                    <td>
+                      <div style={{ display: "flex", flexDirection: "column", gap: "2px", maxWidth: "220px", overflow: "hidden" }}>
+                        <span
+                          style={{
+                            fontSize: "12.5px",
+                            lineHeight: "1.4",
+                            display: "-webkit-box",
+                            WebkitLineClamp: 1,
+                            WebkitBoxOrient: "vertical",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            color: "var(--foreground)"
+                          }}
+                        >
+                          {caption}
+                        </span>
+                        {permalink && (
+                          <a
+                            href={permalink}
+                            target="_blank"
+                            rel="noopener noreferrer"
                             style={{
-                              fontSize: "12.5px",
-                              lineHeight: "1.4",
-                              display: "-webkit-box",
-                              WebkitLineClamp: 1,
-                              WebkitBoxOrient: "vertical",
-                              overflow: "hidden",
-                              textOverflow: "ellipsis",
-                              color: "var(--foreground)"
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "2px",
+                              fontSize: "10.5px",
+                              color: "var(--blue)",
+                              textDecoration: "none"
                             }}
                           >
-                            {caption}
-                          </span>
-                          {permalink && (
-                            <a
-                              href={permalink}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              style={{
-                                display: "inline-flex",
-                                alignItems: "center",
-                                gap: "2px",
-                                fontSize: "10.5px",
-                                color: "var(--blue)",
-                                textDecoration: "none"
-                              }}
-                            >
-                              عرض المنشور الأصلي
-                              <ExternalLink size={10} />
-                            </a>
-                          )}
-                        </div>
+                            رابط المنشور
+                            <ExternalLink size={10} />
+                          </a>
+                        )}
                       </div>
-                    </td>
-                    <td>
-                      <span className="badge badge--neutral" style={{ fontSize: "11px", textTransform: "capitalize" }}>
-                        {platform}
-                      </span>
-                    </td>
-                    <td>
-                      <span style={{ fontWeight: 500, fontSize: "12.5px" }}>
-                        {req.meta_ad_accounts?.name || req.target_meta_account_id || "—"}
-                      </span>
-                    </td>
-                    <td>
-                      <span className="badge badge--neutral" style={{ fontSize: "11px" }}>
-                        {req.destination_type?.toUpperCase()}
-                      </span>
-                    </td>
-                    <td>
-                      <strong className="ltr-val" style={{ fontSize: "12.5px" }}>
-                        {req.requested_daily_budget ? `$${req.requested_daily_budget}` : "تلقائي"}
-                      </strong>
-                    </td>
-                    <td>
-                      <span style={{ fontSize: "12px", color: req.execution_mode === "live" ? "var(--green)" : "var(--muted)" }}>
-                        {req.execution_mode === "live" ? "حقيقي (Live)" : "تجريبي (Dry Run)"}
-                      </span>
                     </td>
                     <td>
                       <span className={`badge ${statusInfo.cls}`} style={{ fontSize: "11px" }}>
@@ -163,7 +176,24 @@ export function RecentRequests({ requests, onSelectRequest, activeRequestId }: R
                       </span>
                     </td>
                     <td>
-                      <span className="ltr-val" style={{ fontSize: "12px", color: "var(--muted)" }}>{formatArabicDate(req.created_at)}</span>
+                      <span style={{ fontSize: "12px", fontWeight: "600", color: "var(--foreground)" }}>
+                        {strategyText}
+                      </span>
+                    </td>
+                    <td>
+                      <span style={{ fontSize: "12px", color: req.execution_mode === "live" ? "var(--green)" : "var(--muted)" }}>
+                        {req.execution_mode === "live" ? "حقيقي" : "تجريبي"}
+                      </span>
+                    </td>
+                    <td>
+                      <span className={`badge ${metaStatusCls}`} style={{ fontSize: "11px" }}>
+                        {metaStatusText}
+                      </span>
+                    </td>
+                    <td>
+                      <span style={{ fontSize: "12px", fontWeight: "600", color: isHuman ? "var(--blue)" : "var(--green)" }}>
+                        {createdByText}
+                      </span>
                     </td>
                     <td>
                       <button

@@ -76,7 +76,7 @@ export async function POST(
       }, { status: 202 });
     }
 
-    // 3. Production Webhook Call (Fast Acknowledgment)
+    // 3. Production Webhook Call with Retry Scheduler (5s, 10s, 20s)
     if (!webhookUrl || !secret) {
       return NextResponse.json(
         { error: "لم تُضبط إعدادات Campaign Builder Webhook على الخادم." },
@@ -84,46 +84,118 @@ export async function POST(
       );
     }
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
+    const retrySchedule = [5000, 10000, 20000];
+    let attempt = 0;
+    let lastError = "";
 
-    try {
-      const response = await fetch(webhookUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-webhook-secret": secret,
-        },
-        body: JSON.stringify({
-          request_id: requestId,
-          tier,
-        }),
-        signal: controller.signal,
-        cache: "no-store",
-      });
+    const checkIfTransientMetaError = (data: any) => {
+      if (!data) return false;
+      const errorMsg = String(data.error_message || data.error || data.message || "").toLowerCase();
+      const errorCode = String(data.error_code || data.code || "").toLowerCase();
+      
+      const isTransient = 
+        errorMsg.includes("timeout") ||
+        errorMsg.includes("temporary") ||
+        errorMsg.includes("rate limit") ||
+        errorMsg.includes("try again") ||
+        errorMsg.includes("server error") ||
+        errorMsg.includes("meta api error 500") ||
+        errorMsg.includes("transient") ||
+        errorCode.includes("1") || 
+        errorCode.includes("2") || 
+        errorCode.includes("17") || 
+        errorCode.includes("4");
 
-      clearTimeout(timeout);
+      const isBlocked = 
+        errorMsg.includes("auth") ||
+        errorMsg.includes("permission") ||
+        errorMsg.includes("token") ||
+        errorMsg.includes("oauth") ||
+        errorMsg.includes("validation") ||
+        errorMsg.includes("invalid") ||
+        errorMsg.includes("required") ||
+        errorMsg.includes("403") ||
+        errorMsg.includes("401");
 
-      if (!response.ok) {
-        return NextResponse.json({ error: "فشل استجابة n8n في محرك بناء الحملة." }, { status: 502 });
+      return isTransient && !isBlocked;
+    };
+
+    while (true) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
+
+      try {
+        console.log(`[Campaign Builder Webhook] Attempt ${attempt + 1} for request ${requestId}`);
+        const response = await fetch(webhookUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-webhook-secret": secret,
+          },
+          body: JSON.stringify({
+            request_id: requestId,
+            tier,
+          }),
+          signal: controller.signal,
+          cache: "no-store",
+        });
+
+        clearTimeout(timeout);
+
+        if (response.ok) {
+          const data = await response.json().catch(() => ({}));
+          const isTransient = checkIfTransientMetaError(data);
+
+          if (isTransient && attempt < retrySchedule.length) {
+            const delay = retrySchedule[attempt];
+            console.warn(`[Campaign Builder Webhook] Transient error response detected in body: ${JSON.stringify(data)}. Retrying attempt ${attempt + 1} in ${delay}ms...`);
+            attempt++;
+            await new Promise((resolve) => setTimeout(resolve, delay));
+            continue;
+          }
+
+          return NextResponse.json({
+            ok: true,
+            accepted: true,
+            request_id: requestId,
+            status: "building",
+            n8n_response: data
+          }, { status: 202 });
+        }
+
+        const is5xx = response.status >= 500;
+        if (is5xx && attempt < retrySchedule.length) {
+          const delay = retrySchedule[attempt];
+          console.warn(`[Campaign Builder Webhook] Transient HTTP status ${response.status} detected. Retrying attempt ${attempt + 1} in ${delay}ms...`);
+          attempt++;
+          await new Promise((resolve) => setTimeout(resolve, delay));
+          continue;
+        }
+
+        const errJson = await response.json().catch(() => ({}));
+        return NextResponse.json(
+          { error: errJson.error || `HTTP error ${response.status} from builder workflow.` },
+          { status: response.status }
+        );
+
+      } catch (err) {
+        clearTimeout(timeout);
+        const isTimeout = err instanceof Error && err.name === "AbortError";
+        lastError = isTimeout ? "AbortError (Timeout)" : (err instanceof Error ? err.message : String(err));
+
+        if (attempt < retrySchedule.length) {
+          const delay = retrySchedule[attempt];
+          console.warn(`[Campaign Builder Webhook] Network exception/timeout (${lastError}). Retrying attempt ${attempt + 1} in ${delay}ms...`);
+          attempt++;
+          await new Promise((resolve) => setTimeout(resolve, delay));
+          continue;
+        }
+
+        return NextResponse.json(
+          { error: isTimeout ? "انتهت مهلة استدعاء Builder Webhook في n8n (Fast ACK)." : `فشل استدعاء n8n: ${lastError}` },
+          { status: 503 }
+        );
       }
-
-      const data = await response.json();
-      return NextResponse.json({
-        ok: true,
-        accepted: true,
-        request_id: requestId,
-        status: "building",
-        n8n_response: data
-      }, { status: 202 });
-
-    } catch (err) {
-      clearTimeout(timeout);
-      const isTimeout = err instanceof Error && err.name === "AbortError";
-      return NextResponse.json(
-        { error: isTimeout ? "انتهت مهلة استدعاء Builder Webhook في n8n (Fast ACK)." : "فشل استدعاء n8n." },
-        { status: 503 }
-      );
     }
   } catch (err) {
     return NextResponse.json(

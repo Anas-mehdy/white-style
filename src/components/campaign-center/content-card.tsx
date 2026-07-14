@@ -85,8 +85,30 @@ export function ContentCard({
           </div>
         )}
 
-        {/* Badges on Thumbnail */}
-        <div style={{ position: "absolute", top: "10px", right: "10px", display: "flex", flexDirection: "column", gap: "6px" }}>
+        {/* AI Candidate Badge (Top Left) */}
+        {(() => {
+          const scoreVal = Math.min(98, Math.max(34, Math.round(60 + (item.likes_count * 0.15) + (item.comments_count * 0.45))));
+          let badgeText = "مرشح ممتاز";
+          let badgeColor = "var(--green)";
+          if (scoreVal < 70) {
+            badgeText = "مرشح ضعيف";
+            badgeColor = "var(--muted)";
+          } else if (scoreVal < 90) {
+            badgeText = "مرشح جيد";
+            badgeColor = "var(--amber)";
+          }
+          return (
+            <div style={{ position: "absolute", top: "10px", left: "10px", zIndex: 2 }}>
+              <span className="badge" style={{ backgroundColor: badgeColor, color: "white", fontSize: "11px", fontWeight: "700", display: "inline-flex", alignItems: "center", gap: "4px", boxShadow: "0 2px 6px rgba(0,0,0,0.3)", backdropFilter: "blur(4px)" }}>
+                <Sparkles size={11} style={{ fill: "white" }} />
+                {badgeText} {scoreVal}%
+              </span>
+            </div>
+          );
+        })()}
+
+        {/* Badges on Thumbnail (Top Right) */}
+        <div style={{ position: "absolute", top: "10px", right: "10px", display: "flex", flexDirection: "column", gap: "6px", zIndex: 2 }}>
           <span className="badge badge--info" style={{ textTransform: "capitalize", fontSize: "10.5px" }}>
             {item.platform === "instagram" ? "Instagram" : "Facebook"}
           </span>
@@ -95,20 +117,12 @@ export function ContentCard({
           </span>
         </div>
 
-        {/* Status Badge */}
-        <div style={{ position: "absolute", bottom: "10px", right: "10px" }}>
+        {/* Status Badge (Bottom Right) */}
+        <div style={{ position: "absolute", bottom: "10px", right: "10px", zIndex: 2 }}>
           <span className={`badge ${statusClasses[item.status] || "badge--neutral"}`} style={{ fontSize: "11px", fontWeight: "600" }}>
             {statusLabels[item.status] || item.status}
           </span>
         </div>
-
-        {item.is_promoted && (
-          <div style={{ position: "absolute", bottom: "10px", left: "10px" }}>
-            <span className="badge badge--warning" style={{ fontSize: "10.5px" }}>
-              مروّج ({item.promotion_count})
-            </span>
-          </div>
-        )}
       </div>
 
       {/* Content details */}
@@ -119,20 +133,20 @@ export function ContentCard({
             fontSize: "13px",
             lineHeight: "1.6",
             color: "var(--foreground)",
-            margin: "0 0 16px 0",
+            margin: "0 0 12px 0",
             display: "-webkit-box",
-            WebkitLineClamp: 3,
+            WebkitLineClamp: 2,
             WebkitBoxOrient: "vertical",
             overflow: "hidden",
             textOverflow: "ellipsis",
-            flex: 1,
+            height: "40px"
           }}
         >
           {item.caption || <span style={{ color: "var(--muted)", fontStyle: "italic" }}>بدون شرح...</span>}
         </p>
 
         {/* Date and Engagement */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid var(--border)", paddingTop: "12px", marginBottom: "16px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid var(--border)", paddingTop: "10px", marginBottom: "12px" }}>
           <span style={{ fontSize: "11.5px", color: "var(--muted)" }}>{formattedDate}</span>
           
           <div style={{ display: "flex", gap: "10px", color: "var(--muted)" }}>
@@ -151,24 +165,55 @@ export function ContentCard({
           </div>
         </div>
 
+        {/* V2 Campaign Status Grid */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px 16px", background: "rgba(255,255,255,0.02)", padding: "10px", borderRadius: "6px", border: "1px solid var(--border)", fontSize: "11.5px", marginBottom: "14px" }}>
+          <div>
+            <span style={{ color: "var(--muted)", display: "block" }}>حالة الإعلان الحالية:</span>
+            <strong style={{ color: item.status === "RUNNING" ? "var(--green)" : item.status === "PROMOTED" ? "var(--amber)" : "var(--muted)", display: "block", marginTop: "2px" }}>
+              {item.status === "RUNNING" ? "نشط (Running)" : item.status === "PROMOTED" ? "موقف مؤقتاً (Paused)" : "غير مروّج"}
+            </strong>
+          </div>
+          <div>
+            <span style={{ color: "var(--muted)", display: "block" }}>إجمالي المرات المروجة:</span>
+            <strong style={{ color: "var(--foreground)", display: "block", marginTop: "2px" }}>
+              {item.promotion_count || 0} حملة
+            </strong>
+          </div>
+          <div style={{ borderTop: "1px solid rgba(255,255,255,0.03)", paddingTop: "6px" }}>
+            <span style={{ color: "var(--muted)", display: "block" }}>الطلبات المحققة:</span>
+            <span style={{ color: "var(--muted)", display: "block", marginTop: "2px" }}>— (قريباً)</span>
+          </div>
+          <div style={{ borderTop: "1px solid rgba(255,255,255,0.03)", paddingTop: "6px" }}>
+            <span style={{ color: "var(--muted)", display: "block" }}>العائد على الاستثمار:</span>
+            <span style={{ color: "var(--muted)", display: "block", marginTop: "2px" }}>— (قريباً)</span>
+          </div>
+        </div>
+
         {/* Action row */}
         <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-          <button
-            onClick={() => onSelectForCampaign(item)}
-            className="sync-button"
-            style={{
-              width: "100%",
-              justifyContent: "center",
-              background: "var(--brand-gradient)",
-              color: "white",
-              border: 0,
-              fontWeight: "600",
-              height: "38px"
-            }}
-          >
-            <Plus size={16} style={{ marginLeft: "4px" }} />
-            تحليل وإنشاء حملة
-          </button>
+          {(() => {
+            const isAlreadyPromoted = item.status === "RUNNING" || item.status === "PROMOTED" || item.is_promoted;
+            return (
+              <button
+                onClick={() => onSelectForCampaign(item)}
+                disabled={isAlreadyPromoted}
+                className="sync-button"
+                style={{
+                  width: "100%",
+                  justifyContent: "center",
+                  background: isAlreadyPromoted ? "rgba(255,255,255,0.05)" : "var(--brand-gradient)",
+                  color: isAlreadyPromoted ? "var(--muted)" : "white",
+                  border: isAlreadyPromoted ? "1px solid var(--border)" : 0,
+                  fontWeight: "700",
+                  height: "38px",
+                  cursor: isAlreadyPromoted ? "not-allowed" : "pointer"
+                }}
+              >
+                <Plus size={16} style={{ marginLeft: "4px" }} />
+                {isAlreadyPromoted ? "مروّج بالفعل (Already Promoted)" : "🚀 Smart Promote / ترويج ذكي"}
+              </button>
+            );
+          })()}
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
             <button
@@ -185,7 +230,7 @@ export function ContentCard({
               }}
             >
               <Eye size={14} style={{ marginLeft: "4px" }} />
-              تفاصيل
+              عرض التفاصيل
             </button>
             <button
               onClick={() => onShowAIEditor(item)}
@@ -201,7 +246,7 @@ export function ContentCard({
               }}
             >
               <Sparkles size={14} style={{ marginLeft: "4px" }} />
-              تحرير ذكي
+              اقتراحات الذكاء الاصطناعي
             </button>
           </div>
 
@@ -218,7 +263,7 @@ export function ContentCard({
                 fontSize: "11px",
                 color: "var(--muted)",
                 textDecoration: "none",
-                marginTop: "4px",
+                marginTop: "2px",
                 alignSelf: "center"
               }}
             >

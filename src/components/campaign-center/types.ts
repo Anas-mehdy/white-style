@@ -77,6 +77,10 @@ export interface CampaignCreationRequest {
   meta_ad_accounts?: {
     name: string;
   } | null;
+  expert_mode?: boolean;
+  created_by?: string;
+  selected_strategy?: string | null;
+  execution_timeline?: Array<{ event: string; timestamp: string }>;
 }
 
 export interface CampaignStrategy {

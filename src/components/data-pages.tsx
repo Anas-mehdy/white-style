@@ -3,6 +3,7 @@
 import { useMemo, useState, useEffect } from "react";
 import { PageHeader, Table } from "@/components/dashboard";
 import { useRouter } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
 import { 
   Search, 
   RotateCcw, 
@@ -1857,21 +1858,188 @@ export function SafetyPage({ rows }: { rows: RecordRow[] }) {
 }
 
 export function SettingsPage({ accounts, configs }: { accounts: RecordRow[]; configs: RecordRow[] }) {
+  const [expertMode, setExpertMode] = useState<boolean>(false);
+  const [defaultAdAccount, setDefaultAdAccount] = useState<string>("");
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [isSaving, setIsSaving] = useState<boolean>(false);
+  const [saveStatus, setSaveStatus] = useState<string | null>(null);
+
+  useEffect(() => {
+    const supabase = createClient();
+    async function loadSettings() {
+      try {
+        const { data, error } = await supabase
+          .from("organization_settings")
+          .select("*")
+          .eq("organization_id", "11111111-1111-4111-8111-111111111111")
+          .maybeSingle();
+
+        if (error) {
+          console.error("Error loading settings from DB:", error);
+        } else if (data) {
+          setExpertMode(data.expert_mode);
+          setDefaultAdAccount(data.default_ad_account || "");
+        } else {
+          // If no settings exist, create default
+          await supabase.from("organization_settings").insert({
+            organization_id: "11111111-1111-4111-8111-111111111111",
+            expert_mode: false,
+            default_ad_account: accounts.length > 0 ? String(accounts[0].id) : null,
+            default_execution_mode: "live",
+            language: "ar",
+            theme: "dark"
+          });
+        }
+      } catch (err) {
+        console.error("Exception loading settings:", err);
+      } finally {
+        setIsLoading(false);
+      }
+    }
+    loadSettings();
+  }, [accounts]);
+
+  const handleSaveSettings = async (newExpertMode: boolean, newDefaultAdAccount: string) => {
+    setIsSaving(true);
+    setSaveStatus(null);
+    const supabase = createClient();
+
+    try {
+      const { error } = await supabase
+        .from("organization_settings")
+        .update({
+          expert_mode: newExpertMode,
+          default_ad_account: newDefaultAdAccount || null,
+          updated_at: new Date().toISOString()
+        })
+        .eq("organization_id", "11111111-1111-4111-8111-111111111111");
+
+      if (error) {
+        setSaveStatus("فشل حفظ الإعدادات: " + error.message);
+      } else {
+        setSaveStatus("تم حفظ الإعدادات بنجاح في قاعدة البيانات ✅");
+        setTimeout(() => setSaveStatus(null), 3000);
+      }
+    } catch (err) {
+      setSaveStatus("خطأ غير متوقع أثناء الحفظ.");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleToggleExpertMode = async () => {
+    const nextVal = !expertMode;
+    setExpertMode(nextVal);
+    await handleSaveSettings(nextVal, defaultAdAccount);
+  };
+
+  const handleChangeDefaultAdAccount = async (val: string) => {
+    setDefaultAdAccount(val);
+    await handleSaveSettings(expertMode, val);
+  };
+
   return (
     <>
-      <PageHeader title="الإعدادات" />
-      <article className="panel settings-card">
-        <h2>الاتصال والحسابات</h2>
-        <p>تُقرأ بيانات الاتصال من Supabase. لا تُعرض مفاتيح API أو Meta tokens في الواجهة.</p>
-        <dl>
-          <dt>الحسابات</dt>
-          <dd>{accounts.length}</dd>
-          <dt>الحسابات المتصلة</dt>
-          <dd>{accounts.filter(x => x.connection_status === "connected").length}</dd>
-          <dt>إعدادات Agent</dt>
-          <dd>{configs.length}</dd>
-        </dl>
-      </article>
+      <PageHeader title="الإعدادات العامة" />
+      
+      <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+        {/* Connection and accounts card */}
+        <article className="panel settings-card">
+          <h2>الاتصال والحسابات الإعلانية</h2>
+          <p>تُقرأ بيانات الاتصال من Supabase وتتم مزامنتها تلقائياً.</p>
+          <dl>
+            <dt>الحسابات الإجمالية</dt>
+            <dd>{accounts.length}</dd>
+            <dt>الحسابات المتصلة بـ Meta</dt>
+            <dd>{accounts.filter(x => x.connection_status === "connected").length}</dd>
+            <dt>إعدادات نظام الأتمتة</dt>
+            <dd>{configs.length}</dd>
+          </dl>
+        </article>
+
+        {/* Autonomous V2 Settings */}
+        <article className="panel settings-card" style={{ border: "1px solid var(--border)", position: "relative" }}>
+          <h2>تخصيص النظام المستقل (Autonomous V2)</h2>
+          <p style={{ color: "var(--muted)", fontSize: "13px", marginTop: "4px" }}>
+            تتحكم هذه الإعدادات في آلية اتخاذ القرار وسلوك موظف التسويق الآلي.
+          </p>
+
+          {isLoading ? (
+            <div style={{ padding: "20px 0", textAlign: "center" }}>
+              <span className="spinner" style={{ margin: "0 auto" }}></span>
+              <p style={{ fontSize: "12.5px", color: "var(--muted)", marginTop: "8px" }}>جاري تحميل الإعدادات من السحابة...</p>
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: "20px", marginTop: "16px" }}>
+              {/* Expert Mode toggle */}
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px", background: "var(--surface-soft)", borderRadius: "8px", border: "1px solid var(--border)" }}>
+                <div style={{ flex: 1, paddingLeft: "16px" }}>
+                  <strong style={{ display: "block", fontSize: "14px", color: "var(--foreground)" }}>وضع الخبير الإداري (Expert Mode)</strong>
+                  <span style={{ fontSize: "12px", color: "var(--muted)", lineHeight: "1.5", display: "block", marginTop: "4px" }}>
+                    عند التفعيل، سيتاح للمشرفين خيار مراجعة الاستراتيجيات (Conservative/Balanced/Aggressive) واختيارها يدوياً. عند الإيقاف، يتخذ الذكاء الاصطناعي القرار تلقائياً بالكامل.
+                  </span>
+                </div>
+                <button
+                  onClick={handleToggleExpertMode}
+                  disabled={isSaving}
+                  className="sync-button"
+                  style={{
+                    background: expertMode ? "var(--green)" : "rgba(255,255,255,0.03)",
+                    color: expertMode ? "white" : "var(--muted)",
+                    borderColor: expertMode ? "var(--green)" : "var(--border)",
+                    fontWeight: "700",
+                    padding: "8px 16px",
+                    minWidth: "120px",
+                    justifyContent: "center"
+                  }}
+                >
+                  {expertMode ? "مفعل (ON)" : "معطل (OFF)"}
+                </button>
+              </div>
+
+              {/* Default Ad Account selector */}
+              <div style={{ display: "flex", flexDirection: "column", gap: "8px", padding: "14px", background: "var(--surface-soft)", borderRadius: "8px", border: "1px solid var(--border)" }}>
+                <div>
+                  <strong style={{ display: "block", fontSize: "14px", color: "var(--foreground)" }}>الحساب الإعلاني الافتراضي (Default Ad Account)</strong>
+                  <span style={{ fontSize: "12px", color: "var(--muted)", lineHeight: "1.5", display: "block", marginTop: "4px" }}>
+                    الحساب الإعلاني المستهدف لحملات الترويج التلقائي بلمسة واحدة في مركز التسويق الآلي.
+                  </span>
+                </div>
+                <select
+                  value={defaultAdAccount}
+                  onChange={(e) => handleChangeDefaultAdAccount(e.target.value)}
+                  disabled={isSaving}
+                  style={{
+                    width: "100%",
+                    maxWidth: "400px",
+                    background: "var(--surface)",
+                    color: "var(--foreground)",
+                    border: "1px solid var(--border)",
+                    borderRadius: "6px",
+                    padding: "8px 12px",
+                    marginTop: "8px",
+                    outline: "none"
+                  }}
+                >
+                  <option value="">-- اختر الحساب الإعلاني الافتراضي --</option>
+                  {accounts.map((acc: any) => (
+                    <option key={acc.id} value={acc.id}>
+                      {acc.name} ({acc.meta_account_id})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Save feedback indicator */}
+              {saveStatus && (
+                <div style={{ fontSize: "12px", fontWeight: "600", color: saveStatus.includes("فشل") ? "var(--red)" : "var(--green-dark)" }}>
+                  {saveStatus}
+                </div>
+              )}
+            </div>
+          )}
+        </article>
+      </div>
     </>
   );
 }

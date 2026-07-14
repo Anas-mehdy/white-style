@@ -2,6 +2,7 @@
 
 import { Shell } from "@/components/dashboard";
 import { useState, useEffect, useRef, use } from "react";
+import { createClient } from "@/lib/supabase/client";
 import { fetchRequestDetails, selectStrategy, buildCampaign, generateStrategy, resolveRequest } from "@/components/campaign-center/api";
 import { CampaignCreationRequest, CampaignStrategy } from "@/components/campaign-center/types";
 import { WorkflowTimeline, TimelineStep } from "@/components/campaign-center/workflow-timeline";
@@ -61,6 +62,23 @@ export default function Page({ params }: PageProps) {
 
   // 1. Initial Data Fetch on Mount
   useEffect(() => {
+    const supabase = createClient();
+    async function checkExpertMode() {
+      try {
+        const { data } = await supabase
+          .from("organization_settings")
+          .select("expert_mode")
+          .eq("organization_id", "11111111-1111-4111-8111-111111111111")
+          .maybeSingle();
+
+        if (data && !data.expert_mode) {
+          router.replace(`/campaigns/${requestId}/building`);
+        }
+      } catch (err) {
+        console.error("Error loading expert mode in strategy page:", err);
+      }
+    }
+    checkExpertMode();
     loadDetails();
     return () => stopPolling();
   }, [requestId]);

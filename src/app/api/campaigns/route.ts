@@ -7,10 +7,10 @@ export async function GET() {
   try {
     const supabase = await createClient();
 
-    // Query recent creation requests joined with ad accounts
+    // Query recent creation requests joined with ad accounts and strategies
     const { data, error } = await supabase
       .from("campaign_creation_requests")
-      .select("*, meta_ad_accounts(name)")
+      .select("*, meta_ad_accounts(name), campaign_strategies(tier, selected, status)")
       .order("created_at", { ascending: false })
       .limit(100);
 

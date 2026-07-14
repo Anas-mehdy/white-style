@@ -1,0 +1,466 @@
+{
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "3292c4d9-4133-411c-82ce-5e79cdff325f",
+      "name": "Manual Test",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        912,
+        672
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ws-02/campaign-request",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "91ba70eb-7856-4c87-b44d-e38ced8c32ed",
+      "name": "Campaign Request Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        912,
+        432
+      ],
+      "webhookId": "24a2a7e0-fc90-41af-830b-a81a3c177bb2",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "CxiVdIZ9xjapDt87",
+          "name": "ads creation secret"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{\n  json: {\n    source_post_url: \"https://www.instagram.com/reel/REPLACE_WITH_REAL_CODE/\",\n    target_ad_account_id: \"21111111-1111-4111-8111-111111111113\",\n    requested_daily_budget: 10,\n    destination_type: \"whatsapp\",\n    execution_mode: \"dry_run\"\n  }\n}];"
+      },
+      "id": "81a9da1e-a1be-4d61-aadc-f6afecfc6724",
+      "name": "Manual Test Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        672
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $json.body ?? $json;\n\nconst ACCOUNT_MAP = {\n  \"0c8b9c6a-4b0e-4424-9fed-7cc2771777e1\": \"act_1264530092507896\",\n  \"21111111-1111-4111-8111-111111111112\": \"act_1626945551688947\",\n  \"21111111-1111-4111-8111-111111111113\": \"act_925213410124697\"\n};\n\nconst ORGANIZATION_ID = \"11111111-1111-4111-8111-111111111111\";\nconst MIN_BUDGET = 5;\nconst MAX_BUDGET = 25;\n\nfunction normalizeUrl(value) {\n  if (typeof value !== \"string\") return \"\";\n  return value.trim().replace(/^=+/, \"\").replace(/[?#].*$/, \"\").replace(/\\/+$/, \"/\");\n}\n\nfunction classify(url, providedPlatform = null, providedType = null) {\n  if (providedPlatform === 'instagram' || providedPlatform === 'facebook') {\n    return {\n      valid: true,\n      platform: providedPlatform,\n      content_type: providedType ?? null\n    };\n  }\n\n  const lower = url.toLowerCase();\n\n  if (/facebook\\.com\\/share\\//.test(lower) || /fb\\.watch\\//.test(lower)) {\n    return {\n      valid: false,\n      error_code: \"SHARE_URL_NOT_SUPPORTED\",\n      error_message: \"استخدم الرابط الأصلي للمنشور أو الريل، وليس رابط Facebook share المختصر.\"\n    };\n  }\n\n  if (/instagram\\.com\\/(p|reel|reels|tv)\\//.test(lower)) {\n    const kind = /instagram\\.com\\/(reel|reels)\\//.test(lower) ? \"reel\" : \"post\";\n    return { valid: true, platform: \"instagram\", content_type: kind };\n  }\n\n  if (\n    /facebook\\.com\\/.+\\/posts\\//.test(lower) ||\n    /facebook\\.com\\/permalink\\.php/.test(lower) ||\n    /facebook\\.com\\/.+\\/videos\\//.test(lower) ||\n    /facebook\\.com\\/reel\\//.test(lower) ||\n    /facebook\\.com\\/watch/.test(lower)\n  ) {\n    const kind =\n      (/\\/reel\\//.test(lower) || /\\/videos\\//.test(lower) || /\\/watch/.test(lower))\n        ? \"reel\"\n        : \"post\";\n\n    return { valid: true, platform: \"facebook\", content_type: kind };\n  }\n\n  return {\n    valid: false,\n    error_code: \"UNSUPPORTED_URL\",\n    error_message: \"الرابط غير معروف. استخدم رابطًا أصليًا لمنشور أو Reel من Facebook أو Instagram.\"\n  };\n}\n\nconst contentLibraryId = String(input.content_library_id ?? \"\").trim();\nconst contentLibraryError = input._content_library_error ?? null;\nconst url = normalizeUrl(input.source_post_url);\nconst targetAdAccountId = String(input.target_ad_account_id ?? \"\").trim();\n\nconst budgetRaw = input.requested_daily_budget;\nconst budget =\n  budgetRaw === null || budgetRaw === undefined || budgetRaw === \"\"\n    ? null\n    : Number(budgetRaw);\n\nconst errors = [];\n\nif (contentLibraryError) {\n  errors.push(contentLibraryError);\n}\n\nif (!contentLibraryId && !url) {\n  errors.push({\n    code: \"MISSING_CONTENT_SOURCE\",\n    message: \"يجب تحديد content_library_id أو source_post_url.\"\n  });\n}\n\nif (contentLibraryId && !url) {\n  errors.push({\n    code: \"CONTENT_PERMALINK_MISSING\",\n    message: \"المحتوى المحدد لا يحتوي رابط permalink صالحًا.\"\n  });\n}\n\nif (!ACCOUNT_MAP[targetAdAccountId]) {\n  errors.push({\n    code: \"INVALID_AD_ACCOUNT\",\n    message: \"الحساب الإعلاني غير معروف أو غير مدعوم.\"\n  });\n}\n\nif (\n  budget !== null &&\n  (!Number.isFinite(budget) || budget < MIN_BUDGET || budget > MAX_BUDGET)\n) {\n  errors.push({\n    code: \"INVALID_BUDGET\",\n    message: `الميزانية اليومية يجب أن تكون بين ${MIN_BUDGET}$ و${MAX_BUDGET}$.`\n  });\n}\n\nconst classified = url\n  ? classify(\n      url,\n      input.source_platform ?? null,\n      input.content_context?.media_type ?? null\n    )\n  : { valid: false };\n\nif (url && !classified.valid) {\n  errors.push({\n    code: classified.error_code,\n    message: classified.error_message\n  });\n}\n\nconst destinationType = String(\n  input.destination_type ?? \"whatsapp\"\n).toLowerCase();\n\nif (![\"whatsapp\", \"messenger\", \"website\"].includes(destinationType)) {\n  errors.push({\n    code: \"INVALID_DESTINATION\",\n    message: \"destination_type يجب أن يكون whatsapp أو messenger أو website.\"\n  });\n}\n\nconst executionMode = String(\n  input.execution_mode ?? \"dry_run\"\n).toLowerCase();\n\nif (![\"dry_run\", \"review\", \"live\"].includes(executionMode)) {\n  errors.push({\n    code: \"INVALID_EXECUTION_MODE\",\n    message: \"execution_mode يجب أن يكون dry_run أو review أو live.\"\n  });\n}\n\nconst placements = String(\n  input.placements ?? \"advantage_plus\"\n).toLowerCase();\n\nif (![\"advantage_plus\", \"facebook_only\", \"instagram_only\"].includes(placements)) {\n  errors.push({\n    code: \"INVALID_PLACEMENTS\",\n    message: \"placements يجب أن يكون advantage_plus أو facebook_only أو instagram_only.\"\n  });\n}\n\nconst now = new Date().toISOString();\n\nconst idempotencyBase = [\n  ORGANIZATION_ID,\n  targetAdAccountId,\n  contentLibraryId || url,\n  destinationType,\n  executionMode\n].join(\"|\");\n\nlet hash = 0;\nfor (let i = 0; i < idempotencyBase.length; i++) {\n  hash = ((hash << 5) - hash) + idempotencyBase.charCodeAt(i);\n  hash |= 0;\n}\n\nconst idempotencyKey =\n  `ws02-${Math.abs(hash)}-${now.slice(0,10)}`;\n\nconst alreadyResolved =\n  contentLibraryId &&\n  input.resolver_status === \"resolved\" &&\n  Boolean(input.source_post_id || input.instagram_media_id);\n\nconst requestPayload = {\n  original_input: input,\n  detected_content_type: classified.content_type,\n  received_at: now,\n  placement_preference: placements,\n  resolver_status: alreadyResolved ? \"resolved\" : \"pending\",\n  resolver_method: alreadyResolved ? \"content_library\" : null,\n  content_library_id: contentLibraryId || null,\n  source_post_id: input.source_post_id ?? null,\n  instagram_media_id: input.instagram_media_id ?? null,\n  page_id: input.page_id ?? null,\n  object_story_id: input.object_story_id ?? null,\n  content_context: input.content_context ?? null,\n  resolved_at: alreadyResolved ? now : null\n};\n\nreturn [{\n  json: {\n    ok: errors.length === 0,\n    http_status: errors.length === 0 ? 202 : 400,\n    errors,\n    record: errors.length === 0\n      ? {\n          organization_id: ORGANIZATION_ID,\n          target_ad_account_id: targetAdAccountId,\n          target_meta_account_id: ACCOUNT_MAP[targetAdAccountId],\n          source_platform: classified.platform,\n          source_post_url: url,\n          destination_type: destinationType,\n          execution_mode: executionMode,\n          status: \"draft\",\n          requested_daily_budget: budget,\n          idempotency_key: idempotencyKey,\n          request_payload: requestPayload\n        }\n      : null,\n    next_step: alreadyResolved ? \"strategy\" : \"resolver\"\n  }\n}];"
+      },
+      "id": "19ce8c78-f15f-48d9-9937-be020c9765f2",
+      "name": "Validate & Normalize Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1600,
+        544
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "74a0d915-8902-4031-aa2b-86d38f2bba80",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "c2d191a3-4304-4fa3-8abc-296138ec7019",
+      "name": "Valid Request?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1880,
+        544
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://wsmbaueobuzilyagtnuq.supabase.co/rest/v1/campaign_creation_requests?on_conflict=idempotency_key",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "resolution=merge-duplicates,return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.record }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "0f9a7d62-c659-43c7-9438-7f6417e891e8",
+      "name": "Save Draft Request",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2160,
+        448
+      ],
+      "credentials": {
+        "httpCustomAuth": {
+          "id": "0akO77AeyCnD4XDu",
+          "name": "White Style Supabase Service Role"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const saved = Array.isArray($json)\n  ? ($json[0] ?? null)\n  : ($json?.data?.[0] ?? $json);\n\nif (!saved?.id) {\n  return [{\n    json: {\n      ok: false,\n      http_status: 502,\n      error: \"INTAKE_SAVE_RESPONSE_INVALID\",\n      message: \"تم إرسال الطلب إلى Supabase لكن لم يتم إرجاع request_id صالح.\"\n    }\n  }];\n}\n\nconst payload = saved.request_payload ?? {};\nconst resolved = payload.resolver_status === 'resolved';\n\nreturn [{\n  json: {\n    ok: true,\n    http_status: 202,\n    status: saved.status ?? \"draft\",\n    id: saved.id,\n    request_id: saved.id,\n    source_platform: saved.source_platform ?? null,\n    source_post_url: saved.source_post_url ?? null,\n    target_ad_account_id: saved.target_ad_account_id ?? null,\n    target_meta_account_id: saved.target_meta_account_id ?? null,\n    destination_type: saved.destination_type ?? null,\n    execution_mode: saved.execution_mode ?? null,\n    resolver_status: payload.resolver_status ?? null,\n    next_step: resolved ? \"strategy\" : \"resolver\",\n    content_library_id: payload.content_library_id ?? null,\n    source_post_id: payload.source_post_id ?? null,\n    instagram_media_id: payload.instagram_media_id ?? null,\n    page_id: payload.page_id ?? null,\n    message: resolved\n      ? \"تم حفظ طلب الحملة من مكتبة المحتوى وهو جاهز مباشرة لتوليد الاستراتيجية.\"\n      : \"تم حفظ طلب إنشاء الحملة كمسودة. الخطوة التالية هي حل معرّف Existing Post.\"\n  }\n}];"
+      },
+      "id": "e78a94a1-7064-4389-ac42-307a4810c10a",
+      "name": "Format Success Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2440,
+        448
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": "={{ $json.http_status }}"
+        }
+      },
+      "id": "d050360d-0be9-4d70-8882-256de622c9bb",
+      "name": "Respond - Accepted",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        2720,
+        448
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{\n  json: {\n    ok: false,\n    http_status: 400,\n    error: \"VALIDATION_FAILED\",\n    details: Array.isArray($json.errors) ? $json.errors : [],\n    message: \"لم يتم حفظ الطلب لأن البيانات غير صالحة.\"\n  }\n}];"
+      },
+      "id": "a709ea58-279d-48c7-a2b3-8201d3d29aa7",
+      "name": "Format Validation Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2160,
+        704
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "id": "0c2f6d12-cbf6-4c68-bbcd-29fbb8d530b8",
+      "name": "Respond - Bad Request",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        2440,
+        704
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## WS-02 Campaign Request Intake — Production\n\nAccepts either:\n\n### Content Library flow (primary)\n- `content_library_id`\n- `target_ad_account_id`\n- `destination_type`\n- `requested_daily_budget`\n- `placements`\n- `execution_mode`\n\nThe workflow loads the selected row from `content_library`, derives the real Meta identifiers, and saves the request as already resolved.\n\n### Manual URL flow (fallback)\n- `source_post_url`\n- `target_ad_account_id`\n- `destination_type`\n- `requested_daily_budget`\n- `placements`\n- `execution_mode`\n\nThe request remains pending for WS-02 Existing Post Resolver.\n\nWebhook:\n`POST /webhook/ws-02/campaign-request`\n\nThis workflow never creates or activates ads.",
+        "height": 300,
+        "width": 720,
+        "color": 5
+      },
+      "id": "e5a318ca-f59d-4103-8c63-38432deb8e58",
+      "name": "WS-02 Notes",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        768,
+        144
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $json.body ?? $json;\n\nreturn [{\n  json: {\n    input,\n    content_library_id: String(input.content_library_id ?? '').trim(),\n    has_content_library_id: Boolean(String(input.content_library_id ?? '').trim())\n  }\n}];"
+      },
+      "id": "c2bf46bf-3ec1-4618-a022-e3c8711baaaa",
+      "name": "Normalize Intake Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        544
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "87219369-c6a9-4b08-a99d-9fa90814368f",
+              "leftValue": "={{ $json.has_content_library_id }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "4b0e1614-118a-44bd-bf67-14bb4d212a04",
+      "name": "Content Library Selected?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1520,
+        368
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://wsmbaueobuzilyagtnuq.supabase.co/rest/v1/content_library?id=eq.' + $json.content_library_id + '&select=*' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "d8e65e4a-e8af-4a4f-90cb-7b84f1834f0c",
+      "name": "Load Content Library Item",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1740,
+        288
+      ],
+      "credentials": {
+        "httpCustomAuth": {
+          "id": "0akO77AeyCnD4XDu",
+          "name": "White Style Supabase Service Role"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $('Normalize Intake Input').first().json.input;\nconst raw = $json;\n\nlet content = null;\nif (Array.isArray(raw)) {\n  content = raw[0] ?? null;\n} else if (Array.isArray(raw?.data)) {\n  content = raw.data[0] ?? null;\n} else if (raw && typeof raw === 'object' && raw.id) {\n  content = raw;\n}\n\nif (!content) {\n  return [{\n    json: {\n      ...input,\n      _content_library_error: {\n        code: 'CONTENT_LIBRARY_ITEM_NOT_FOUND',\n        message: 'لم يتم العثور على المحتوى المحدد داخل مكتبة المحتوى.'\n      }\n    }\n  }];\n}\n\nreturn [{\n  json: {\n    ...input,\n    content_library_id: content.id,\n    source_post_url: content.permalink,\n    source_platform: content.platform,\n    source_post_id: content.meta_post_id,\n    instagram_media_id: content.instagram_media_id,\n    page_id: content.page_id,\n    content_context: {\n      caption: content.caption ?? null,\n      media_type: content.content_type ?? content.media_type ?? null,\n      thumbnail_url: content.thumbnail_url ?? null,\n      media_url: content.media_url ?? null,\n      permalink: content.permalink ?? null,\n      created_time: content.created_time ?? null,\n      likes_count: Number(content.likes_count ?? 0),\n      comments_count: Number(content.comments_count ?? 0),\n      shares_count: Number(content.shares_count ?? 0)\n    },\n    resolver_status: 'resolved',\n    resolver_method: 'content_library'\n  }\n}];"
+      },
+      "id": "f1f29e00-21c0-4735-9eb9-590535cfc874",
+      "name": "Prepare Content Library Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1960,
+        288
+      ]
+    }
+  ],
+  "connections": {
+    "Manual Test": {
+      "main": [
+        [
+          {
+            "node": "Manual Test Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Campaign Request Webhook": {
+      "main": [
+        [
+          {
+            "node": "Normalize Intake Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Test Payload": {
+      "main": [
+        [
+          {
+            "node": "Normalize Intake Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate & Normalize Request": {
+      "main": [
+        [
+          {
+            "node": "Valid Request?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valid Request?": {
+      "main": [
+        [
+          {
+            "node": "Save Draft Request",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Validation Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Draft Request": {
+      "main": [
+        [
+          {
+            "node": "Format Success Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Success Response": {
+      "main": [
+        [
+          {
+            "node": "Respond - Accepted",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Validation Error": {
+      "main": [
+        [
+          {
+            "node": "Respond - Bad Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Intake Input": {
+      "main": [
+        [
+          {
+            "node": "Content Library Selected?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Content Library Selected?": {
+      "main": [
+        [
+          {
+            "node": "Load Content Library Item",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Validate & Normalize Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Content Library Item": {
+      "main": [
+        [
+          {
+            "node": "Prepare Content Library Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Content Library Request": {
+      "main": [
+        [
+          {
+            "node": "Validate & Normalize Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "instanceId": "3627ba6daf2493916a6fceb2a3504fb1c7a7c5bdb98b4f0c08b1ab54ef103805"
+  },
+  "name": "WS-02 Campaign Request Intake - Production",
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Hebron",
+    "saveManualExecutions": true,
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all"
+  },
+  "versionId": "84ee04bb-311f-4afd-9b84-90ccbf65cc57"
+}

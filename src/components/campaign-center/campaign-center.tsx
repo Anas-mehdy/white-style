@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 
 import { useState, useEffect, useRef } from "react";
+import { createClient } from "@/lib/supabase/client";
 import { WorkflowTimeline, TimelineStep } from "./workflow-timeline";
 import { ContentAnalysis } from "./content-analysis";
 import { StrategySelector } from "./strategy-selector";
@@ -34,6 +35,7 @@ interface Account {
   id: string;
   name: string;
   meta_account_id: string;
+  connection_status?: string;
 }
 
 interface CampaignCenterProps {
@@ -397,12 +399,30 @@ export function CampaignCenter({ accounts }: CampaignCenterProps) {
   };
 
   // 10. Selection details helper from table row
-  const handleSelectRequestFromTable = (req: CampaignCreationRequest) => {
+  const handleSelectRequestFromTable = async (req: CampaignCreationRequest) => {
     const buildStatuses = ["building", "ready_for_review", "approved", "published"];
     if (buildStatuses.includes(req.status)) {
       router.push(`/campaigns/${req.id}/building`);
-    } else {
+      return;
+    }
+
+    const supabase = createClient();
+    let isExpert = false;
+    try {
+      const { data } = await supabase
+        .from("organization_settings")
+        .select("expert_mode")
+        .eq("organization_id", "11111111-1111-4111-8111-111111111111")
+        .maybeSingle();
+      isExpert = data?.expert_mode ?? false;
+    } catch (e) {
+      console.error("Error reading expert mode settings in table click:", e);
+    }
+
+    if (isExpert) {
       router.push(`/campaigns/${req.id}/strategy`);
+    } else {
+      router.push(`/campaigns/${req.id}/building`);
     }
   };
 
@@ -463,9 +483,115 @@ export function CampaignCenter({ accounts }: CampaignCenterProps) {
   };
 
   // Card triggers
-  const handleSelectForCampaign = (item: ContentLibraryItem) => {
-    setSelectedItemForCampaign(item);
-    setIsCampaignDrawerOpen(true);
+  const handleSelectForCampaign = async (item: ContentLibraryItem) => {
+    setIsSubmitting(true);
+    setErrorMessage(null);
+    setActiveRequest(null);
+    setStrategies([]);
+    setSelectedStrategy(null);
+
+    const supabase = createClient();
+    let selectedAccountId = "";
+
+    // 1. Check previously used account for this content
+    try {
+      const { data: prevReq } = await supabase
+        .from("campaign_creation_requests")
+        .select("target_ad_account_id")
+        .eq("request_payload->>content_library_id", item.id)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (prevReq?.target_ad_account_id) {
+        selectedAccountId = prevReq.target_ad_account_id;
+      }
+    } catch (err) {
+      console.error("Error looking up previous account:", err);
+    }
+
+    // 2. If not found, use Default Ad Account from settings
+    if (!selectedAccountId) {
+      try {
+        const { data: settings } = await supabase
+          .from("organization_settings")
+          .select("default_ad_account")
+          .eq("organization_id", "11111111-1111-4111-8111-111111111111")
+          .maybeSingle();
+
+        if (settings?.default_ad_account) {
+          selectedAccountId = settings.default_ad_account;
+        }
+      } catch (err) {
+        console.error("Error looking up default account:", err);
+      }
+    }
+
+    // 3. Fallback to first connected account
+    if (!selectedAccountId) {
+      const connected = accounts.filter(a => a.connection_status === "connected");
+      if (connected.length > 0) {
+        selectedAccountId = connected[0].id;
+      } else if (accounts.length > 0) {
+        selectedAccountId = accounts[0].id;
+      }
+    }
+
+    if (!selectedAccountId) {
+      setErrorMessage("لا يوجد حساب إعلاني متصل لبدء الحملة. يرجى مراجعة صفحة الإعدادات.");
+      setIsSubmitting(false);
+      return;
+    }
+
+    // Load expert mode from settings
+    let isExpert = false;
+    try {
+      const { data: settings } = await supabase
+        .from("organization_settings")
+        .select("expert_mode")
+        .eq("organization_id", "11111111-1111-4111-8111-111111111111")
+        .maybeSingle();
+      if (settings) {
+        isExpert = settings.expert_mode;
+      }
+    } catch (e) {
+      console.error("Error fetching expert mode setting:", e);
+    }
+
+    // Create the request using our V2 parameters
+    const res = await createRequest({
+      content_library_id: item.id,
+      target_ad_account_id: selectedAccountId,
+      destination_type: "whatsapp",
+      requested_daily_budget: null,
+      execution_mode: "live",
+      placements: "advantage_plus",
+      expert_mode: isExpert,
+    } as any);
+
+    setIsSubmitting(false);
+
+    if (res.error) {
+      setErrorMessage(res.error);
+      return;
+    }
+
+    if (res.data) {
+      const newReq = Array.isArray(res.data) ? res.data[0] : res.data;
+      const reqId = newReq?.id || newReq?.request_id;
+      
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if (!reqId || !uuidRegex.test(reqId)) {
+        setErrorMessage("خطأ: لم يتم تلقي معرف طلب صالح (UUID) من الخادم. تعذر بدء المزامنة.");
+        return;
+      }
+
+      if (isExpert) {
+        router.push(`/campaigns/${reqId}/strategy`);
+      } else {
+        router.push(`/campaigns/${reqId}/building`);
+      }
+    }
   };
 
   const handleShowDetails = (item: ContentLibraryItem) => {
@@ -486,10 +612,10 @@ export function CampaignCenter({ accounts }: CampaignCenterProps) {
           <div>
             <h1 style={{ fontSize: "20px", fontWeight: "700", display: "flex", alignItems: "center", gap: "8px" }}>
               <Library size={22} style={{ color: "var(--blue)" }} />
-              مكتبة المحتوى وإنشاء الحملات
+              مركز التسويق بالذكاء الاصطناعي (AI Marketing Center)
             </h1>
             <p style={{ color: "var(--muted)", fontSize: "13px", marginTop: "4px" }}>
-              اختر منشورًا أو Reel من حسابات White Style ثم حلله وأنشئ له حملة إعلانية ذكية.
+              قم بإدارة حملاتك الترويجية ذاتية القيادة بالكامل. يحلل الذكاء الاصطناعي تفاعل المحتوى ويشيد الخطط الإعلانية وينشرها تلقائياً على Meta.
             </p>
           </div>
 
@@ -676,48 +802,7 @@ export function CampaignCenter({ accounts }: CampaignCenterProps) {
             }}
           />
 
-          {/* 4. Collapsible Manual URL Resolver fallback */}
-          <div className="panel" style={{ marginTop: "12px", border: "1px solid var(--border)" }}>
-            <button
-              onClick={() => setShowManualFallback(!showManualFallback)}
-              style={{
-                width: "100%",
-                background: "transparent",
-                border: 0,
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                color: "var(--foreground)",
-                fontWeight: "600",
-                fontSize: "14px",
-                cursor: "pointer",
-                padding: "4px 0"
-              }}
-            >
-              <span style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                <Link size={16} style={{ color: "var(--blue)" }} />
-                لا تجد المنشور المطلق؟ ألصق الرابط يدوياً كخيار بديل
-              </span>
-              <span style={{ fontSize: "12px", color: "var(--muted)" }}>
-                {showManualFallback ? "إغلاق النموذج ▲" : "عرض النموذج القديم ▼"}
-              </span>
-            </button>
 
-            {showManualFallback && (
-              <motion.div
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: "auto" }}
-                transition={{ duration: 0.2 }}
-                style={{ marginTop: "16px", borderTop: "1px solid var(--border)", paddingTop: "16px" }}
-              >
-                <RequestForm
-                  accounts={accounts}
-                  onSubmit={handleCreateManualRequest}
-                  isLoading={isSubmitting}
-                />
-              </motion.div>
-            )}
-          </div>
         </div>
       )}
 
