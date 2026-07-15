@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 
 import { useState, useEffect, useRef } from "react";
-import { createClient } from "@/lib/supabase/client";
+
 import { WorkflowTimeline, TimelineStep } from "./workflow-timeline";
 import { ContentAnalysis } from "./content-analysis";
 import { StrategySelector } from "./strategy-selector";
@@ -406,15 +406,13 @@ export function CampaignCenter({ accounts }: CampaignCenterProps) {
       return;
     }
 
-    const supabase = createClient();
     let isExpert = false;
     try {
-      const { data } = await supabase
-        .from("organization_settings")
-        .select("expert_mode")
-        .eq("organization_id", "11111111-1111-4111-8111-111111111111")
-        .maybeSingle();
-      isExpert = data?.expert_mode ?? false;
+      const res = await fetch("/api/settings", { cache: "no-store" });
+      if (res.ok) {
+        const data = await res.json();
+        isExpert = data.expert_mode ?? false;
+      }
     } catch (e) {
       console.error("Error reading expert mode settings in table click:", e);
     }
@@ -490,44 +488,40 @@ export function CampaignCenter({ accounts }: CampaignCenterProps) {
     setStrategies([]);
     setSelectedStrategy(null);
 
-    const supabase = createClient();
     let selectedAccountId = "";
+    let isExpert = false;
+    let alreadyPromoted = false;
+    let existingRequestId = "";
 
-    // 1. Check previously used account for this content
     try {
-      const { data: prevReq } = await supabase
-        .from("campaign_creation_requests")
-        .select("target_ad_account_id")
-        .eq("request_payload->>content_library_id", item.id)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      const [contextRes, settingsRes] = await Promise.all([
+        fetch(`/api/content/${item.id}/promotion-context`, { cache: "no-store" }),
+        fetch("/api/settings", { cache: "no-store" })
+      ]);
 
-      if (prevReq?.target_ad_account_id) {
-        selectedAccountId = prevReq.target_ad_account_id;
+      if (contextRes.ok) {
+        const context = await contextRes.json();
+        selectedAccountId = context.recommended_ad_account_id;
+        alreadyPromoted = context.already_promoted;
+        existingRequestId = context.existing_request_id;
+      }
+      
+      if (settingsRes.ok) {
+        const settings = await settingsRes.json();
+        isExpert = settings.expert_mode ?? false;
       }
     } catch (err) {
-      console.error("Error looking up previous account:", err);
+      console.error("Error loading promotion context / settings:", err);
     }
 
-    // 2. If not found, use Default Ad Account from settings
-    if (!selectedAccountId) {
-      try {
-        const { data: settings } = await supabase
-          .from("organization_settings")
-          .select("default_ad_account")
-          .eq("organization_id", "11111111-1111-4111-8111-111111111111")
-          .maybeSingle();
-
-        if (settings?.default_ad_account) {
-          selectedAccountId = settings.default_ad_account;
-        }
-      } catch (err) {
-        console.error("Error looking up default account:", err);
-      }
+    // Double-check if already promoted and redirect to building page
+    if (alreadyPromoted && existingRequestId) {
+      router.push(`/campaigns/${existingRequestId}/building`);
+      setIsSubmitting(false);
+      return;
     }
 
-    // 3. Fallback to first connected account
+    // Connected-account fallback
     if (!selectedAccountId) {
       const connected = accounts.filter(a => a.connection_status === "connected");
       if (connected.length > 0) {
@@ -541,21 +535,6 @@ export function CampaignCenter({ accounts }: CampaignCenterProps) {
       setErrorMessage("لا يوجد حساب إعلاني متصل لبدء الحملة. يرجى مراجعة صفحة الإعدادات.");
       setIsSubmitting(false);
       return;
-    }
-
-    // Load expert mode from settings
-    let isExpert = false;
-    try {
-      const { data: settings } = await supabase
-        .from("organization_settings")
-        .select("expert_mode")
-        .eq("organization_id", "11111111-1111-4111-8111-111111111111")
-        .maybeSingle();
-      if (settings) {
-        isExpert = settings.expert_mode;
-      }
-    } catch (e) {
-      console.error("Error fetching expert mode setting:", e);
     }
 
     // Create the request using our V2 parameters

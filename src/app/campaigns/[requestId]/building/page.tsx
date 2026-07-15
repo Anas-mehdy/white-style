@@ -31,7 +31,7 @@ import {
 } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { createClient } from "@/lib/supabase/client";
+
 import { formatArabicDate } from "@/lib/readable-helpers";
 
 interface PageProps {
@@ -81,14 +81,14 @@ export default function Page({ params }: PageProps) {
   // 1. Fetch initial details & Settings on mount
   useEffect(() => {
     async function loadSettingsAndDetails() {
-      const supabase = createClient();
       try {
-        const { data } = await supabase
-          .from("organization_settings")
-          .select("expert_mode")
-          .eq("organization_id", "11111111-1111-4111-8111-111111111111")
-          .maybeSingle();
-        setExpertMode(data?.expert_mode ?? false);
+        const res = await fetch("/api/settings", { cache: "no-store" });
+        if (res.ok) {
+          const data = await res.json();
+          setExpertMode(data.expert_mode ?? false);
+        } else {
+          setExpertMode(false);
+        }
       } catch (err) {
         console.error("Error loading settings:", err);
         setExpertMode(false);
@@ -116,6 +116,20 @@ export default function Page({ params }: PageProps) {
       setRequest(reqData);
       setStrategies(strats);
 
+      console.log("[BUILDING_REQUEST_LOADED]", {
+        requestId,
+        status: reqData.status,
+        resolverStatus: reqData.request_payload?.resolver_status,
+        expertMode: reqData.expert_mode,
+      });
+
+      console.log("[STRATEGY_TRIGGER_CONDITION]", {
+        isDraft: reqData.status === "draft",
+        isResolved:
+          reqData.request_payload?.resolver_status === "resolved",
+        alreadyTriggered: strategyTriggeredRef.current,
+      });
+
       const selected = strats.find((s) => s.selected === true);
       if (selected) {
         setSelectedStrategy(selected);
@@ -141,11 +155,13 @@ export default function Page({ params }: PageProps) {
       const payload = req.request_payload || {};
       const hasNoStrategies = strats.length === 0;
       
+      const isDraft = req.status === "draft";
+      const isResolved = payload.resolver_status === "resolved";
+      const hasNextStepStrategy = nextStepParam === "strategy";
+
       if (
-        expertMode === false &&
-        req.status === "draft" &&
-        (payload.resolver_status === "resolved" || nextStepParam === "strategy") &&
-        payload.strategy_status !== "analyzing" &&
+        isDraft &&
+        (isResolved || hasNextStepStrategy) &&
         hasNoStrategies &&
         !strategyTriggeredRef.current
       ) {
@@ -167,9 +183,10 @@ export default function Page({ params }: PageProps) {
     strategyTriggeredRef.current = true;
     setStrategyError(null);
 
-    console.log(`[Auto-Strategy] Automatically triggering WS-03 strategist for request ${requestId}`);
+    console.log("[STRATEGY_TRIGGER_SEND]", requestId);
     try {
-      await generateStrategy(requestId);
+      const response = await generateStrategy(requestId);
+      console.log("[STRATEGY_TRIGGER_ACCEPTED]", response);
       await loadDetails();
     } catch (err) {
       console.error("[Auto-Strategy] Failed to trigger strategy:", err);
@@ -203,6 +220,20 @@ export default function Page({ params }: PageProps) {
         setRequest(reqData);
         setStrategies(strats);
 
+        console.log("[BUILDING_REQUEST_LOADED]", {
+          requestId,
+          status: reqData.status,
+          resolverStatus: reqData.request_payload?.resolver_status,
+          expertMode: reqData.expert_mode,
+        });
+
+        console.log("[STRATEGY_TRIGGER_CONDITION]", {
+          isDraft: reqData.status === "draft",
+          isResolved:
+            reqData.request_payload?.resolver_status === "resolved",
+          alreadyTriggered: strategyTriggeredRef.current,
+        });
+
         const selected = strats.find((s) => s.selected === true);
         if (selected) {
           setSelectedStrategy(selected);
@@ -212,11 +243,13 @@ export default function Page({ params }: PageProps) {
         const payload = reqData.request_payload || {};
         const hasNoStrategies = strats.length === 0;
 
+        const isDraft = reqData.status === "draft";
+        const isResolved = payload.resolver_status === "resolved";
+        const hasNextStepStrategy = nextStepParam === "strategy";
+
         if (
-          reqData.status === "draft" &&
-          expertMode === false &&
-          (payload.resolver_status === "resolved" || nextStepParam === "strategy") &&
-          payload.strategy_status !== "analyzing" &&
+          isDraft &&
+          (isResolved || hasNextStepStrategy) &&
           hasNoStrategies &&
           !strategyTriggeredRef.current
         ) {

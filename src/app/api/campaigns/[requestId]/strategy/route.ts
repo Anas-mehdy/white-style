@@ -19,8 +19,8 @@ export async function POST(
       return NextResponse.json({ error: "معرف الطلب غير صالح (UUID format required)" }, { status: 400 });
     }
 
-    console.log("[WS03_TRIGGER_START]", { requestId });
-    console.log("[WS03_WEBHOOK_URL_PRESENT]", Boolean(webhookUrl));
+    console.log("[WS03_ROUTE_RECEIVED]", { requestId });
+    console.log("[WS03_WEBHOOK_CONFIGURED]", Boolean(webhookUrl));
 
     const supabase = await createClient();
 
@@ -106,7 +106,10 @@ export async function POST(
       clearTimeout(timeout);
 
       const responseBody = await response.text();
-      console.log("[WS03_RESPONSE]", response.status, responseBody);
+      console.log("[WS03_N8N_RESPONSE]", {
+        status: response.status,
+        body: responseBody
+      });
 
       // Return 502/503 only if n8n did not accept execution
       if (!response.ok) {

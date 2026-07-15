@@ -1865,30 +1865,15 @@ export function SettingsPage({ accounts, configs }: { accounts: RecordRow[]; con
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
 
   useEffect(() => {
-    const supabase = createClient();
     async function loadSettings() {
       try {
-        const { data, error } = await supabase
-          .from("organization_settings")
-          .select("*")
-          .eq("organization_id", "11111111-1111-4111-8111-111111111111")
-          .maybeSingle();
-
-        if (error) {
-          console.error("Error loading settings from DB:", error);
-        } else if (data) {
+        const res = await fetch("/api/settings", { cache: "no-store" });
+        if (res.ok) {
+          const data = await res.json();
           setExpertMode(data.expert_mode);
           setDefaultAdAccount(data.default_ad_account || "");
         } else {
-          // If no settings exist, create default
-          await supabase.from("organization_settings").insert({
-            organization_id: "11111111-1111-4111-8111-111111111111",
-            expert_mode: false,
-            default_ad_account: accounts.length > 0 ? String(accounts[0].id) : null,
-            default_execution_mode: "live",
-            language: "ar",
-            theme: "dark"
-          });
+          console.error("Error loading settings from API");
         }
       } catch (err) {
         console.error("Exception loading settings:", err);
@@ -1897,25 +1882,25 @@ export function SettingsPage({ accounts, configs }: { accounts: RecordRow[]; con
       }
     }
     loadSettings();
-  }, [accounts]);
+  }, []);
 
   const handleSaveSettings = async (newExpertMode: boolean, newDefaultAdAccount: string) => {
     setIsSaving(true);
     setSaveStatus(null);
-    const supabase = createClient();
 
     try {
-      const { error } = await supabase
-        .from("organization_settings")
-        .update({
+      const res = await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
           expert_mode: newExpertMode,
-          default_ad_account: newDefaultAdAccount || null,
-          updated_at: new Date().toISOString()
+          default_ad_account: newDefaultAdAccount || null
         })
-        .eq("organization_id", "11111111-1111-4111-8111-111111111111");
+      });
 
-      if (error) {
-        setSaveStatus("فشل حفظ الإعدادات: " + error.message);
+      if (!res.ok) {
+        const data = await res.json();
+        setSaveStatus("فشل حفظ الإعدادات: " + (data.error || "خطأ غير معروف"));
       } else {
         setSaveStatus("تم حفظ الإعدادات بنجاح في قاعدة البيانات ✅");
         setTimeout(() => setSaveStatus(null), 3000);
