@@ -118,7 +118,31 @@ export async function POST(request: Request) {
       execution_mode,
       placements,
       expert_mode, // V2 field
+      idempotency_key,
     } = body;
+
+    const supabase = await createClient();
+
+    // 1. Idempotency Check: Intercept duplicate requests and return unchanged
+    if (idempotency_key) {
+      const { data: existingReq, error: existErr } = await supabase
+        .from("campaign_creation_requests")
+        .select("*")
+        .eq("idempotency_key", idempotency_key)
+        .maybeSingle();
+
+      if (existingReq) {
+        console.log("[INTAKE_IDEMPOTENCY_CONFLICT] Request already exists with key, returning unchanged:", existingReq.id);
+        return NextResponse.json({
+          ok: true,
+          duplicate: true,
+          request_id: existingReq.id,
+          status: existingReq.status,
+          next_step: "existing_request",
+          ...existingReq
+        });
+      }
+    }
 
     // Validate parameters depending on flow (content selection vs manual URL paste)
     if (!target_ad_account_id || !destination_type || !placements || (!content_library_id && !source_post_url)) {
@@ -245,6 +269,8 @@ export async function POST(request: Request) {
           requested_daily_budget,
           execution_mode: execution_mode || "dry_run",
           placements,
+          idempotency_key,
+          expert_mode,
         }),
         signal: controller.signal,
         cache: "no-store",

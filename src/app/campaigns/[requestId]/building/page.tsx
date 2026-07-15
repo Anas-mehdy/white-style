@@ -60,6 +60,7 @@ export default function Page({ params }: PageProps) {
   const [isDecisionOpen, setIsDecisionOpen] = useState<boolean>(false);
   const [strategyError, setStrategyError] = useState<string | null>(null);
   const [buildError, setBuildError] = useState<string | null>(null);
+  const [isStaleDataState, setIsStaleDataState] = useState<boolean>(false);
 
   const strategyTriggeredRef = useRef(false);
   const buildTriggeredRef = useRef(false);
@@ -173,15 +174,21 @@ export default function Page({ params }: PageProps) {
       const isResolved = payload.resolver_status === "resolved";
       const hasNextStepStrategy = nextStepParam === "strategy";
 
-      if (
-        isDraft &&
-        (isResolved || hasNextStepStrategy) &&
-        hasNoStrategies &&
-        !strategyTriggeredRef.current
-      ) {
-        triggerAutoStrategy();
+      if (isDraft && (isResolved || hasNextStepStrategy)) {
+        if (hasNoStrategies) {
+          if (!strategyTriggeredRef.current) {
+            setIsStaleDataState(false);
+            triggerAutoStrategy();
+          }
+        } else {
+          console.warn("[STALE_STRATEGY_ROWS_ON_DRAFT_REQUEST] Draft request has existing strategies!");
+          setIsStaleDataState(true);
+        }
+      } else {
+        setIsStaleDataState(false);
       }
     } else if (req.status === "strategy_ready") {
+      setIsStaleDataState(false);
       // Check if we should automatically promote (expertMode = OFF)
       if (expertMode === false && !isAutoBuilding) {
         // Resolve selected strategy tier robustly
@@ -195,6 +202,8 @@ export default function Page({ params }: PageProps) {
         const isValidMode = validModes.includes(req.execution_mode || "");
         
         const selectedStrat = strats?.find((s) => s.selected === true) ?? null;
+        const selectedCount = strats?.filter((s) => s.selected === true).length || 0;
+        
         const hasMetaIds = !!selectedStrat?.meta_campaign_id ||
                            !!selectedStrat?.meta_adset_id ||
                            !!selectedStrat?.meta_creative_id ||
@@ -208,6 +217,7 @@ export default function Page({ params }: PageProps) {
           expertMode,
           selectedTier,
           safetyApproved,
+          selectedCount,
           alreadyTriggered: buildTriggeredRef.current,
           metaCampaignId: selectedStrat?.meta_campaign_id,
           metaAdsetId: selectedStrat?.meta_adset_id,
@@ -217,6 +227,7 @@ export default function Page({ params }: PageProps) {
 
         if (
           selectedTier &&
+          selectedCount === 1 &&
           safetyApproved &&
           safeToBuild &&
           isValidMode &&
@@ -309,17 +320,23 @@ export default function Page({ params }: PageProps) {
         const isResolved = payload.resolver_status === "resolved";
         const hasNextStepStrategy = nextStepParam === "strategy";
 
-        if (
-          isDraft &&
-          (isResolved || hasNextStepStrategy) &&
-          hasNoStrategies &&
-          !strategyTriggeredRef.current
-        ) {
-          triggerAutoStrategy();
+        if (isDraft && (isResolved || hasNextStepStrategy)) {
+          if (hasNoStrategies) {
+            if (!strategyTriggeredRef.current) {
+              setIsStaleDataState(false);
+              triggerAutoStrategy();
+            }
+          } else {
+            console.warn("[STALE_STRATEGY_ROWS_ON_DRAFT_REQUEST] Draft request has existing strategies!");
+            setIsStaleDataState(true);
+          }
+        } else {
+          setIsStaleDataState(false);
         }
 
         // Check auto-build in polling loop if state changes to strategy_ready
         if (reqData.status === "strategy_ready" && expertMode === false && !isAutoBuilding) {
+          setIsStaleDataState(false);
           const selectedTier = resolveSelectedTier(reqData, strats);
           
           const safetyApproved = reqData.request_payload?.safety_review?.approved === true;
@@ -329,6 +346,8 @@ export default function Page({ params }: PageProps) {
           const isValidMode = validModes.includes(reqData.execution_mode || "");
           
           const selectedStrat = strats?.find((s) => s.selected === true) ?? null;
+          const selectedCount = strats?.filter((s) => s.selected === true).length || 0;
+          
           const hasMetaIds = !!selectedStrat?.meta_campaign_id ||
                              !!selectedStrat?.meta_adset_id ||
                              !!selectedStrat?.meta_creative_id ||
@@ -342,6 +361,7 @@ export default function Page({ params }: PageProps) {
             expertMode,
             selectedTier,
             safetyApproved,
+            selectedCount,
             alreadyTriggered: buildTriggeredRef.current,
             metaCampaignId: selectedStrat?.meta_campaign_id,
             metaAdsetId: selectedStrat?.meta_adset_id,
@@ -351,6 +371,7 @@ export default function Page({ params }: PageProps) {
 
           if (
             selectedTier &&
+            selectedCount === 1 &&
             safetyApproved &&
             safeToBuild &&
             isValidMode &&
@@ -612,6 +633,53 @@ export default function Page({ params }: PageProps) {
                       }}
                     >
                       إعادة تشغيل التحليل
+                    </button>
+                  </div>
+                )}
+
+                {isStaleDataState && (
+                  <div className="panel" style={{ background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.2)", borderRadius: "8px", padding: "16px", marginBottom: "16px", display: "flex", flexDirection: "column", gap: "10px", direction: "rtl", textAlign: "right" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px", color: "var(--amber)" }}>
+                      <AlertCircle size={20} />
+                      <strong style={{ fontSize: "14px" }}>تم اكتشاف بيانات متبقية من محاولة سابقة.</strong>
+                    </div>
+                    <p style={{ fontSize: "13px", color: "var(--muted)", margin: 0 }}>
+                      تم العثور على استراتيجيات مخزنة لحملة مسبقة على طلب مسودة جديد. (STALE_STRATEGY_ROWS_ON_DRAFT_REQUEST)
+                    </p>
+                    <button
+                      onClick={async () => {
+                        try {
+                          setIsSyncing(true);
+                          const retryRes = await fetch(`/api/campaigns/${requestId}/retry`, {
+                            method: "POST"
+                          });
+                          if (!retryRes.ok) {
+                            const data = await retryRes.json();
+                            throw new Error(data.error || "فشل تنظيف البيانات");
+                          }
+                          setIsStaleDataState(false);
+                          strategyTriggeredRef.current = false;
+                          buildTriggeredRef.current = false;
+                          await loadDetails();
+                        } catch (err) {
+                          console.error("Error repairing stale data state:", err);
+                          setErrorMessage(err instanceof Error ? err.message : "فشلت عملية المزامنة والتنظيف.");
+                        } finally {
+                          setIsSyncing(false);
+                        }
+                      }}
+                      className="sync-button"
+                      style={{
+                        background: "var(--brand-gradient)",
+                        borderColor: "transparent",
+                        color: "white",
+                        alignSelf: "flex-start",
+                        fontWeight: "700",
+                        fontSize: "12px",
+                        padding: "6px 16px"
+                      }}
+                    >
+                      تنظيف البيانات وإعادة التشغيل (Clear & Restart)
                     </button>
                   </div>
                 )}

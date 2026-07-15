@@ -481,7 +481,7 @@ export function CampaignCenter({ accounts }: CampaignCenterProps) {
   };
 
   // Card triggers
-  const handleSelectForCampaign = async (item: ContentLibraryItem) => {
+  const handleSelectForCampaign = async (item: ContentLibraryItem, forceNewAttempt = false) => {
     setIsSubmitting(true);
     setErrorMessage(null);
     setActiveRequest(null);
@@ -492,6 +492,7 @@ export function CampaignCenter({ accounts }: CampaignCenterProps) {
     let isExpert = false;
     let alreadyPromoted = false;
     let existingRequestId = "";
+    let recommendedAction = "create_new";
 
     try {
       const [contextRes, settingsRes] = await Promise.all([
@@ -504,6 +505,7 @@ export function CampaignCenter({ accounts }: CampaignCenterProps) {
         selectedAccountId = context.recommended_ad_account_id;
         alreadyPromoted = context.already_promoted;
         existingRequestId = context.existing_request_id;
+        recommendedAction = context.recommended_action || "create_new";
       }
       
       if (settingsRes.ok) {
@@ -514,11 +516,8 @@ export function CampaignCenter({ accounts }: CampaignCenterProps) {
       console.error("Error loading promotion context / settings:", err);
     }
 
-    // Double-check if already promoted and redirect to building page
-    if (alreadyPromoted && existingRequestId) {
-      router.push(`/campaigns/${existingRequestId}/building`);
-      setIsSubmitting(false);
-      return;
+    if (forceNewAttempt) {
+      recommendedAction = "create_new";
     }
 
     // Connected-account fallback
@@ -537,6 +536,41 @@ export function CampaignCenter({ accounts }: CampaignCenterProps) {
       return;
     }
 
+    // Action A: Open Existing Request
+    if (recommendedAction === "open_existing" && existingRequestId) {
+      alert("هذا المنشور لديه طلب ترويج سابق. سيتم نقلك لمتابعته.");
+      router.push(`/campaigns/${existingRequestId}/building`);
+      setIsSubmitting(false);
+      return;
+    }
+
+    // Action B: Retry Failed Request
+    if (recommendedAction === "retry" && existingRequestId) {
+      try {
+        console.log(`[Smart Promote Retry] Triggering controlled reset retry for request ${existingRequestId}`);
+        const retryRes = await fetch(`/api/campaigns/${existingRequestId}/retry`, {
+          method: "POST"
+        });
+        
+        if (!retryRes.ok) {
+          const data = await retryRes.json();
+          throw new Error(data.error || "فشلت إعادة تهيئة المحاولة");
+        }
+        
+        router.push(`/campaigns/${existingRequestId}/building`);
+      } catch (err) {
+        console.error("Error retrying request:", err);
+        setErrorMessage(err instanceof Error ? err.message : "فشلت إعادة محاولة الترويج.");
+      } finally {
+        setIsSubmitting(false);
+      }
+      return;
+    }
+
+    // Action C: Promote Again / New Request Attempt
+    const attemptId = self.crypto.randomUUID();
+    const idempotencyKey = `campaign:11111111-1111-4111-8111-111111111111:${item.id}:${attemptId}`;
+
     // Create the request using our V2 parameters
     const res = await createRequest({
       content_library_id: item.id,
@@ -546,6 +580,7 @@ export function CampaignCenter({ accounts }: CampaignCenterProps) {
       execution_mode: "live",
       placements: "advantage_plus",
       expert_mode: isExpert,
+      idempotency_key: idempotencyKey,
     } as any);
 
     setIsSubmitting(false);

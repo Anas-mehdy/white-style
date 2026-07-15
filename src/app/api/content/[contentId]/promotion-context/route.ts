@@ -16,11 +16,10 @@ export async function GET(
 
     const supabase = await createClient();
 
-    // 1. Fetch previously used account for this content from campaign_creation_requests
+    // 1. Fetch previously used account and request details for this content
     let previousAdAccountId: string | null = null;
     let existingRequestId: string | null = null;
     let existingStatus: string | null = null;
-    let alreadyPromoted = false;
 
     const { data: prevReq, error: prevErr } = await supabase
       .from("campaign_creation_requests")
@@ -38,11 +37,6 @@ export async function GET(
       previousAdAccountId = prevReq.target_ad_account_id;
       existingRequestId = prevReq.id;
       existingStatus = prevReq.status;
-      
-      const promotedStatuses = ["building", "ready_for_review", "approved", "published"];
-      if (promotedStatuses.includes(prevReq.status)) {
-        alreadyPromoted = true;
-      }
     }
 
     // 2. Fetch Default Ad Account from settings
@@ -76,7 +70,6 @@ export async function GET(
     if (accounts && accounts.length > 0) {
       firstConnectedAccountId = accounts[0].id;
     } else {
-      // Fallback: fetch any meta_ad_account if none are connected
       const { data: fallbackAccounts } = await supabase
         .from("meta_ad_accounts")
         .select("id")
@@ -86,16 +79,21 @@ export async function GET(
       }
     }
 
-    // Smart account selection strategy priority:
-    // 1. Previous ad account
-    // 2. Default ad account from settings
-    // 3. First connected meta ad account
+    // Recommended account priority
     const recommendedAdAccountId = previousAdAccountId || defaultAdAccountId || firstConnectedAccountId || "";
 
-    if (!recommendedAdAccountId) {
-      return NextResponse.json({
-        error: "لم يتم العثور على حساب إعلاني متصل لبدء الحملة. يرجى تهيئة حساب إعلاني في الإعدادات."
-      }, { status: 404 });
+    // Determine promotion context fields
+    const alreadyPromoted = existingStatus ? !["failed", "resolution_failed"].includes(existingStatus) : false;
+    const canRetry = existingStatus === "failed" || existingStatus === "resolution_failed";
+    const canPromoteAgain = existingStatus === "published" || existingStatus === "failed" || existingStatus === "resolution_failed" || !existingStatus;
+
+    let recommendedAction = "create_new";
+    if (existingRequestId) {
+      if (canRetry) {
+        recommendedAction = "retry";
+      } else {
+        recommendedAction = "open_existing";
+      }
     }
 
     return NextResponse.json({
@@ -106,7 +104,10 @@ export async function GET(
       recommended_ad_account_id: recommendedAdAccountId,
       already_promoted: alreadyPromoted,
       existing_request_id: existingRequestId,
-      existing_status: existingStatus
+      existing_status: existingStatus,
+      can_retry: canRetry,
+      can_promote_again: canPromoteAgain,
+      recommended_action: recommendedAction
     });
 
   } catch (err) {

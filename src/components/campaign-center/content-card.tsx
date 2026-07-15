@@ -6,7 +6,7 @@ import { ContentLibraryItem } from "./types";
 
 interface ContentCardProps {
   item: ContentLibraryItem;
-  onSelectForCampaign: (item: ContentLibraryItem) => void;
+  onSelectForCampaign: (item: ContentLibraryItem, forceNewAttempt?: boolean) => void;
   onShowDetails: (item: ContentLibraryItem) => void;
   onShowAIEditor: (item: ContentLibraryItem) => void;
 }
@@ -193,24 +193,63 @@ export function ContentCard({
         <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
           {(() => {
             const isAlreadyPromoted = item.status === "RUNNING" || item.status === "PROMOTED" || item.is_promoted;
+            if (isAlreadyPromoted) {
+              return (
+                <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                  <button
+                    disabled
+                    className="sync-button"
+                    style={{
+                      width: "100%",
+                      justifyContent: "center",
+                      background: "rgba(255,255,255,0.05)",
+                      color: "var(--muted)",
+                      border: "1px solid var(--border)",
+                      fontWeight: "700",
+                      height: "38px",
+                      cursor: "not-allowed"
+                    }}
+                  >
+                    مروّج بالفعل (Already Promoted)
+                  </button>
+                  <button
+                    onClick={() => onSelectForCampaign(item, true)}
+                    type="button"
+                    className="sync-button"
+                    style={{
+                      width: "100%",
+                      justifyContent: "center",
+                      background: "rgba(16, 185, 129, 0.1)",
+                      border: "1px solid rgba(16, 185, 129, 0.3)",
+                      color: "var(--green)",
+                      fontWeight: "700",
+                      fontSize: "12px",
+                      height: "30px",
+                      cursor: "pointer"
+                    }}
+                  >
+                    🚀 ترويج مجدداً (Promote Again)
+                  </button>
+                </div>
+              );
+            }
             return (
               <button
-                onClick={() => onSelectForCampaign(item)}
-                disabled={isAlreadyPromoted}
+                onClick={() => onSelectForCampaign(item, false)}
                 className="sync-button"
                 style={{
                   width: "100%",
                   justifyContent: "center",
-                  background: isAlreadyPromoted ? "rgba(255,255,255,0.05)" : "var(--brand-gradient)",
-                  color: isAlreadyPromoted ? "var(--muted)" : "white",
-                  border: isAlreadyPromoted ? "1px solid var(--border)" : 0,
+                  background: "var(--brand-gradient)",
+                  color: "white",
+                  border: 0,
                   fontWeight: "700",
                   height: "38px",
-                  cursor: isAlreadyPromoted ? "not-allowed" : "pointer"
+                  cursor: "pointer"
                 }}
               >
                 <Plus size={16} style={{ marginLeft: "4px" }} />
-                {isAlreadyPromoted ? "مروّج بالفعل (Already Promoted)" : "🚀 Smart Promote / ترويج ذكي"}
+                🚀 Smart Promote / ترويج ذكي
               </button>
             );
           })()}
