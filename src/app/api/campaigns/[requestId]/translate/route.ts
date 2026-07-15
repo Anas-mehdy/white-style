@@ -31,6 +31,7 @@ export async function POST(
       .maybeSingle();
 
     if (fetchErr) {
+      console.error("[TRANSLATION_FETCH_ERROR] Failed to query campaign request:", fetchErr);
       return NextResponse.json({ error: fetchErr.message }, { status: 500 });
     }
 
@@ -45,6 +46,7 @@ export async function POST(
       .eq("request_id", requestId);
 
     if (strategiesError) {
+      console.error("[TRANSLATION_STRATEGIES_ERROR] Failed to query strategies:", strategiesError);
       return NextResponse.json({ error: strategiesError.message }, { status: 500 });
     }
 
@@ -73,6 +75,7 @@ export async function POST(
     // 8. Call OpenAI translation model
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
+      console.error("[TRANSLATION_KEY_ERROR] OPENAI_API_KEY environment variable is not configured on the server.");
       return NextResponse.json({ error: "مفتاح OpenAI API غير مهيأ على الخادم." }, { status: 500 });
     }
 
@@ -80,7 +83,7 @@ export async function POST(
     try {
       translatedProse = await callOpenAiTranslation(apiKey, englishProse);
     } catch (err: any) {
-      console.error("OpenAI Translation failure:", err);
+      console.error("[TRANSLATION_OPENAI_ERROR] OpenAI Responses API call failed:", err);
       return NextResponse.json(
         { error: `فشلت عملية الترجمة: ${err?.message || err}` },
         { status: 502 }
@@ -102,6 +105,7 @@ export async function POST(
 
     return NextResponse.json({ translated: fullyTranslatedPayload });
   } catch (err: any) {
+    console.error("[TRANSLATION_CRITICAL_CRASH] Unhandled exception in translation route:", err);
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Internal Server Error" },
       { status: 500 }

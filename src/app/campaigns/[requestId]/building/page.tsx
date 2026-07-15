@@ -105,14 +105,24 @@ export default function Page({ params }: PageProps) {
           }
         });
         if (!active) return;
-        const result = await response.json();
-        if (response.ok && result.translated) {
+        
+        let result: any = null;
+        try {
+          result = await response.json();
+        } catch {
+          console.error("[TRANSLATION_HTTP_ERROR]", response.status, response.statusText);
+        }
+
+        if (response.ok && result?.translated) {
           setTranslatedTransparency(result.translated);
         } else {
-          setTranslationError(result.error || "خطأ في الترجمة");
+          const errMsg = result?.error || `خطأ في الخادم (Status: ${response.status})`;
+          console.error("[TRANSLATION_API_ERROR]", errMsg);
+          setTranslationError(errMsg);
         }
       } catch (err: any) {
         if (active) {
+          console.error("[TRANSLATION_CONN_ERROR]", err);
           setTranslationError(err?.message || "خطأ في الاتصال بالخادم");
         }
       } finally {
