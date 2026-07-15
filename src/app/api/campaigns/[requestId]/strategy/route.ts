@@ -13,6 +13,15 @@ export async function POST(
     const webhookUrl = process.env.N8N_WS03_STRATEGY_WEBHOOK_URL;
     const secret = process.env.N8N_CAMPAIGN_WEBHOOK_SECRET;
 
+    // Validate UUID format
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!requestId || !uuidRegex.test(requestId)) {
+      return NextResponse.json({ error: "معرف الطلب غير صالح (UUID format required)" }, { status: 400 });
+    }
+
+    console.log("[WS03_TRIGGER_START]", { requestId });
+    console.log("[WS03_WEBHOOK_URL_PRESENT]", Boolean(webhookUrl));
+
     const supabase = await createClient();
 
     // 1. Fetch current status for duplicate protection check
@@ -96,13 +105,20 @@ export async function POST(
 
       clearTimeout(timeout);
 
+      const responseBody = await response.text();
+      console.log("[WS03_RESPONSE]", response.status, responseBody);
+
       // Return 502/503 only if n8n did not accept execution
       if (!response.ok) {
-        return NextResponse.json({ error: "فشل استجابة n8n في محاذاة الاستراتيجيات." }, { status: 502 });
+        return NextResponse.json({ error: `فشل استجابة n8n في محاذاة الاستراتيجيات. الحالة: ${response.status}` }, { status: 502 });
       }
 
-      // Read fast response from n8n
-      const data = await response.json();
+      let data = {};
+      try {
+        data = JSON.parse(responseBody);
+      } catch (e) {
+        // Response body not JSON
+      }
       
       // Pass the 202 response to the frontend directly
       return NextResponse.json({

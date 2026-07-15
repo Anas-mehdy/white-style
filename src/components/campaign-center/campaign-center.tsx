@@ -579,6 +579,7 @@ export function CampaignCenter({ accounts }: CampaignCenterProps) {
     if (res.data) {
       const newReq = Array.isArray(res.data) ? res.data[0] : res.data;
       const reqId = newReq?.id || newReq?.request_id;
+      const nextStep = newReq?.next_step || (res.data as any)?.next_step;
       
       const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
       if (!reqId || !uuidRegex.test(reqId)) {
@@ -589,7 +590,8 @@ export function CampaignCenter({ accounts }: CampaignCenterProps) {
       if (isExpert) {
         router.push(`/campaigns/${reqId}/strategy`);
       } else {
-        router.push(`/campaigns/${reqId}/building`);
+        const query = nextStep ? `?next_step=${nextStep}` : "";
+        router.push(`/campaigns/${reqId}/building${query}`);
       }
     }
   };

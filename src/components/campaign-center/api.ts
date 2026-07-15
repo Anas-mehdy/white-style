@@ -133,14 +133,17 @@ export async function resolveRequest(requestId: string): Promise<ApiResponse<Cam
 }
 
 export async function generateStrategy(requestId: string): Promise<ApiResponse<CampaignCreationRequest>> {
-  try {
-    const res = await fetchWithTimeout("/api/campaigns/" + requestId + "/strategy", { method: "POST" });
-    const data = await res.json();
-    if (!res.ok) return { error: data.error || "فشل توليد الاستراتيجية" };
-    return { data };
-  } catch (err) {
-    return { error: err instanceof Error ? err.message : "فشل توليد الاستراتيجية" };
+  const res = await fetchWithTimeout(`/api/campaigns/${requestId}/strategy`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    cache: "no-store",
+  }, 20000);
+
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || `HTTP error ${res.status}: فشل توليد الاستراتيجية`);
   }
+  return { data };
 }
 
 export async function selectStrategy(requestId: string, tier: 'conservative' | 'balanced' | 'aggressive'): Promise<ApiResponse<CampaignStrategy>> {

@@ -2,7 +2,7 @@
 
 import { Shell } from "@/components/dashboard";
 import { useState, useEffect, useRef, use } from "react";
-import { fetchRequestDetails, buildCampaign } from "@/components/campaign-center/api";
+import { fetchRequestDetails, buildCampaign, generateStrategy } from "@/components/campaign-center/api";
 import { CampaignCreationRequest, CampaignStrategy } from "@/components/campaign-center/types";
 import { 
   X, 
@@ -29,7 +29,7 @@ import {
   Users,
   Compass
 } from "lucide-react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { createClient } from "@/lib/supabase/client";
 import { formatArabicDate } from "@/lib/readable-helpers";
@@ -40,6 +40,8 @@ interface PageProps {
 
 export default function Page({ params }: PageProps) {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const nextStepParam = searchParams ? searchParams.get("next_step") : null;
   const { requestId } = use(params);
 
   const [request, setRequest] = useState<CampaignCreationRequest | null>(null);
@@ -56,7 +58,9 @@ export default function Page({ params }: PageProps) {
   const [isAutoBuilding, setIsAutoBuilding] = useState<boolean>(false);
   const [isLogOpen, setIsLogOpen] = useState<boolean>(false);
   const [isDecisionOpen, setIsDecisionOpen] = useState<boolean>(false);
+  const [strategyError, setStrategyError] = useState<string | null>(null);
 
+  const strategyTriggeredRef = useRef(false);
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const progressSteps = [
@@ -132,6 +136,21 @@ export default function Page({ params }: PageProps) {
     } else if (req.status === "draft" || req.status === "analyzing") {
       // Keep polling to watch resolution and AI strategy generation progress
       startBuildPolling();
+
+      // Check V2 Auto-Trigger for WS-03 Strategy Generation
+      const payload = req.request_payload || {};
+      const hasNoStrategies = strats.length === 0;
+      
+      if (
+        expertMode === false &&
+        req.status === "draft" &&
+        (payload.resolver_status === "resolved" || nextStepParam === "strategy") &&
+        payload.strategy_status !== "analyzing" &&
+        hasNoStrategies &&
+        !strategyTriggeredRef.current
+      ) {
+        triggerAutoStrategy();
+      }
     } else if (req.status === "strategy_ready") {
       // Check if we should automatically promote (expertMode = OFF)
       if (expertMode === false && !isAutoBuilding) {
@@ -140,6 +159,21 @@ export default function Page({ params }: PageProps) {
         // If expert mode is ON, we shouldn't be on the building page while in strategy_ready state
         router.push(`/campaigns/${requestId}/strategy`);
       }
+    }
+  };
+
+  const triggerAutoStrategy = async () => {
+    if (strategyTriggeredRef.current) return;
+    strategyTriggeredRef.current = true;
+    setStrategyError(null);
+
+    console.log(`[Auto-Strategy] Automatically triggering WS-03 strategist for request ${requestId}`);
+    try {
+      await generateStrategy(requestId);
+      await loadDetails();
+    } catch (err) {
+      console.error("[Auto-Strategy] Failed to trigger strategy:", err);
+      setStrategyError(err instanceof Error ? err.message : String(err));
     }
   };
 
@@ -172,6 +206,21 @@ export default function Page({ params }: PageProps) {
         const selected = strats.find((s) => s.selected === true);
         if (selected) {
           setSelectedStrategy(selected);
+        }
+
+        // Also check auto-strategy trigger in polling loop just in case resolver completes while polling
+        const payload = reqData.request_payload || {};
+        const hasNoStrategies = strats.length === 0;
+
+        if (
+          reqData.status === "draft" &&
+          expertMode === false &&
+          (payload.resolver_status === "resolved" || nextStepParam === "strategy") &&
+          payload.strategy_status !== "analyzing" &&
+          hasNoStrategies &&
+          !strategyTriggeredRef.current
+        ) {
+          triggerAutoStrategy();
         }
 
         // Check auto-build in polling loop if state changes to strategy_ready
@@ -254,12 +303,13 @@ export default function Page({ params }: PageProps) {
       
       case 1: // Content Library Intake
         if (status === "resolution_failed") return "failed";
-        if (payload.resolver_status === "resolved" || status !== "draft") return "completed";
+        if (payload.resolver_status === "resolved" || nextStepParam === "strategy" || status !== "draft") return "completed";
         return "running";
       
       case 2: // Content AI Analysis
         if (payload.content_analysis) return "completed";
-        if (payload.resolver_status === "resolved") return "running";
+        if (strategyError) return "failed";
+        if (status === "analyzing") return "running";
         return "pending";
 
       case 3: // Historical Data Query
@@ -399,6 +449,37 @@ export default function Page({ params }: PageProps) {
               </div>
               
               <div style={{ display: "flex", flexDirection: "column", gap: "14px", padding: "4px 0" }}>
+                {strategyError && (
+                  <div className="panel" style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", borderRadius: "8px", padding: "16px", marginBottom: "16px", display: "flex", flexDirection: "column", gap: "10px", direction: "rtl", textAlign: "right" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px", color: "var(--red)" }}>
+                      <AlertCircle size={20} />
+                      <strong style={{ fontSize: "14px" }}>تعذر بدء تحليل الذكاء الاصطناعي (WS-03).</strong>
+                    </div>
+                    <p style={{ fontSize: "13px", color: "var(--muted)", margin: 0 }}>
+                      التفاصيل: {strategyError}
+                    </p>
+                    <button
+                      onClick={() => {
+                        strategyTriggeredRef.current = false;
+                        setStrategyError(null);
+                        triggerAutoStrategy();
+                      }}
+                      className="sync-button"
+                      style={{
+                        background: "var(--brand-gradient)",
+                        borderColor: "transparent",
+                        color: "white",
+                        alignSelf: "flex-start",
+                        fontWeight: "700",
+                        fontSize: "12px",
+                        padding: "6px 16px"
+                      }}
+                    >
+                      إعادة تشغيل التحليل
+                    </button>
+                  </div>
+                )}
+
                 {progressSteps.map((step, idx) => {
                   const stepState = getStepStatus(idx);
 
@@ -416,13 +497,17 @@ export default function Page({ params }: PageProps) {
                     icon = <AlertCircle size={16} style={{ color: "var(--red)", fill: "rgba(239, 68, 68, 0.05)" }} />;
                   }
 
+                  const stepLabel = (idx === 2 && request.status === "draft" && request.request_payload?.resolver_status === "resolved")
+                    ? "جاري بدء محرك الاستراتيجية..."
+                    : step.label;
+
                   return (
                     <div key={step.key} style={{ display: "flex", gap: "12px", alignItems: "center" }}>
                       <div style={{ width: "24px", height: "24px", display: "grid", placeItems: "center", flexShrink: 0 }}>
                         {icon}
                       </div>
                       <span style={{ fontSize: "13px", fontWeight: stepState === "running" ? "700" : "500", color: stepColor }}>
-                        {step.label}
+                        {stepLabel}
                       </span>
                     </div>
                   );
