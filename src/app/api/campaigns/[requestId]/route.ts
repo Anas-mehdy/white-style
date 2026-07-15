@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { NextRequest, NextResponse } from "next/server";
+import { normalizeTransparency } from "@/lib/campaign-transparency";
 
 export const dynamic = "force-dynamic";
 
@@ -15,7 +16,7 @@ export async function GET(
     // 1. Fetch current record
     const { data: requestData, error: requestError } = await supabase
       .from("campaign_creation_requests")
-      .select("*, meta_ad_accounts(name), campaign_strategies(id, tier, selected, status, meta_campaign_id, meta_adset_id, meta_creative_id, meta_ad_id)")
+      .select("*, meta_ad_accounts(name, currency), campaign_strategies(id, tier, selected, status, meta_campaign_id, meta_adset_id, meta_creative_id, meta_ad_id)")
       .eq("id", requestId)
       .maybeSingle();
 
@@ -176,7 +177,7 @@ export async function GET(
           // Force reload requestData
           const { data: reloadedReq } = await supabase
             .from("campaign_creation_requests")
-            .select("*, meta_ad_accounts(name), campaign_strategies(id, tier, selected, status, meta_campaign_id, meta_adset_id, meta_creative_id, meta_ad_id)")
+            .select("*, meta_ad_accounts(name, currency), campaign_strategies(id, tier, selected, status, meta_campaign_id, meta_adset_id, meta_creative_id, meta_ad_id)")
             .eq("id", requestId)
             .single();
           if (reloadedReq) {
@@ -211,7 +212,7 @@ export async function GET(
           // Force reload requestData
           const { data: reloadedReq } = await supabase
             .from("campaign_creation_requests")
-            .select("*, meta_ad_accounts(name), campaign_strategies(id, tier, selected, status, meta_campaign_id, meta_adset_id, meta_creative_id, meta_ad_id)")
+            .select("*, meta_ad_accounts(name, currency), campaign_strategies(id, tier, selected, status, meta_campaign_id, meta_adset_id, meta_creative_id, meta_ad_id)")
             .eq("id", requestId)
             .single();
           if (reloadedReq) {
@@ -312,9 +313,29 @@ export async function GET(
       console.error("Failed to automatically update campaign execution timeline:", e);
     }
 
+    const transparency = normalizeTransparency(requestData, strategies || []);
+
+    if (process.env.NODE_ENV === "development") {
+      const selectedStrat = strategies?.find((s: any) => s.selected === true || s.status === "selected");
+      const discoveredSections = [];
+      if (transparency.contentAnalysis.summary) discoveredSections.push("contentAnalysis");
+      if (transparency.historicalAnalysis.rationale) discoveredSections.push("historicalAnalysis");
+      if (transparency.audienceSelection.rationale) discoveredSections.push("audienceSelection");
+      if (transparency.budgeting.dailyBudget !== null) discoveredSections.push("budgeting");
+      if (transparency.safetyCheck.strategy) discoveredSections.push("safetyCheck");
+
+      console.log("[DEV_DIAGNOSTICS_TRANSPARENCY]", {
+        requestId: requestId,
+        selectedStrategyId: selectedStrat?.id || null,
+        discoveredSections: discoveredSections,
+        transparency: transparency
+      });
+    }
+
     return NextResponse.json({
       request: requestData,
       strategies: strategies || [],
+      transparency: transparency,
     });
   } catch (err) {
     return NextResponse.json(

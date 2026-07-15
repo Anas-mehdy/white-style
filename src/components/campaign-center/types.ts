@@ -122,3 +122,36 @@ export interface CampaignStrategy {
   build_error_code: string | null;
   build_error_message: string | null;
 }
+
+export interface AITransparency {
+  contentAnalysis: {
+    summary: string | null;
+    detectedObjective: string | null;
+    productType: string | null;
+  };
+  historicalAnalysis: {
+    rationale: string | null;
+    bestPattern: string | null;
+    dataUsed: boolean | null;
+  };
+  audienceSelection: {
+    countries: string[];
+    locations: string[];
+    placements: string[];
+    ageMin: number | null;
+    ageMax: number | null;
+    genders: string[];
+    rationale: string | null;
+  };
+  budgeting: {
+    dailyBudget: number | null;
+    currency: string | null;
+    rationale: string | null;
+  };
+  safetyCheck: {
+    strategy: string | null;
+    status: string | null;
+    compliancePercentage: number | null;
+    warnings: string[];
+  };
+}
