@@ -145,8 +145,8 @@ export default function Page({ params }: PageProps) {
   const resolveSelectedTier = (req: CampaignCreationRequest, strats: CampaignStrategy[]) => {
     const selectedStrat = strats?.find((strategy) => strategy.selected === true) ?? null;
     return (
-      selectedStrat?.tier ??
       req.selected_strategy ??
+      selectedStrat?.tier ??
       req.request_payload?.selected_strategy_tier ??
       req.request_payload?.safety_review?.recommended_tier ??
       req.request_payload?.campaign_strategy?.recommended_tier ??

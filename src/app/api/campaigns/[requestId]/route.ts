@@ -15,7 +15,7 @@ export async function GET(
     // 1. Fetch current record
     const { data: requestData, error: requestError } = await supabase
       .from("campaign_creation_requests")
-      .select("*, meta_ad_accounts(name)")
+      .select("*, meta_ad_accounts(name), campaign_strategies(id, tier, selected, status, meta_campaign_id, meta_adset_id, meta_creative_id, meta_ad_id)")
       .eq("id", requestId)
       .maybeSingle();
 
@@ -176,7 +176,7 @@ export async function GET(
           // Force reload requestData
           const { data: reloadedReq } = await supabase
             .from("campaign_creation_requests")
-            .select("*, meta_ad_accounts(name)")
+            .select("*, meta_ad_accounts(name), campaign_strategies(id, tier, selected, status, meta_campaign_id, meta_adset_id, meta_creative_id, meta_ad_id)")
             .eq("id", requestId)
             .single();
           if (reloadedReq) {
@@ -211,7 +211,7 @@ export async function GET(
           // Force reload requestData
           const { data: reloadedReq } = await supabase
             .from("campaign_creation_requests")
-            .select("*, meta_ad_accounts(name)")
+            .select("*, meta_ad_accounts(name), campaign_strategies(id, tier, selected, status, meta_campaign_id, meta_adset_id, meta_creative_id, meta_ad_id)")
             .eq("id", requestId)
             .single();
           if (reloadedReq) {
