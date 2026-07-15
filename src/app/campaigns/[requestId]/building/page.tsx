@@ -6,6 +6,15 @@ import { fetchRequestDetails, buildCampaign, generateStrategy, selectStrategy } 
 import { CampaignCreationRequest, CampaignStrategy, AITransparency } from "@/components/campaign-center/types";
 import { StrategyCard } from "@/components/campaign-center/strategy-card";
 import { normalizeTransparency } from "@/lib/campaign-transparency";
+import {
+  translateObjective,
+  translateGender,
+  translatePlacement,
+  translateCountry,
+  translateStatus,
+  translateCategory,
+  formatFallbackValue
+} from "@/lib/campaign-translation/dictionaries";
 import { 
   X, 
   CheckCircle2, 
@@ -74,55 +83,55 @@ export default function Page({ params }: PageProps) {
     return trans;
   }, [request, strategies, selectedStrategy]);
 
-  const translateObjective = (obj: string | null): string => {
-    if (!obj) return "غير متوفر";
-    const map: Record<string, string> = {
-      MESSAGES: "الرسائل والمحادثات",
-      ENGAGEMENT: "التفاعل والنشاط",
-      TRAFFIC: "زيارات الموقع",
-      SALES: "المبيعات والتحويلات",
-      OUTCOMES: "المبيعات والنتائج",
-    };
-    return map[obj.toUpperCase()] || obj;
-  };
+  const [showArabicTranslation, setShowArabicTranslation] = useState<boolean>(true);
+  const [translatedTransparency, setTranslatedTransparency] = useState<AITransparency | null>(null);
+  const [translationLoading, setTranslationLoading] = useState<boolean>(false);
+  const [translationError, setTranslationError] = useState<string | null>(null);
 
-  const translateGender = (g: string | null): string => {
-    if (!g) return "غير متوفر";
-    const map: Record<string, string> = {
-      all: "الكل (ذكور وإناث)",
-      female: "إناث فقط",
-      male: "ذكور فقط",
-    };
-    return map[g.toLowerCase()] || g;
-  };
+  useEffect(() => {
+    if (!request) return;
+    if (request.status === "analyzing") return;
 
-  const translatePlacement = (p: string | null): string => {
-    if (!p) return "";
-    const map: Record<string, string> = {
-      facebook_feed: "آخر أخبار فيسبوك",
-      instagram_feed: "آخر أخبار إنستغرام",
-      instagram_reels: "ريلز إنستغرام",
-      facebook_reels: "ريلز فيسبوك",
-      instagram_stories: "قصص إنستغرام",
-      facebook_stories: "قصص فيسبوك",
-      advantage_plus: "Advantage+ مواضع تلقائية",
-    };
-    return map[p.toLowerCase()] || p;
-  };
+    let active = true;
 
-  const translateCountry = (c: string | null): string => {
-    if (!c) return "";
-    const map: Record<string, string> = {
-      PS: "فلسطين",
-      IL: "فلسطين / المنطقة",
-      JO: "الأردن",
-      EG: "مصر",
-      AE: "الإمارات",
-      SA: "السعودية",
+    async function fetchTranslation() {
+      setTranslationLoading(true);
+      setTranslationError(null);
+      try {
+        const response = await fetch(`/api/campaigns/${requestId}/translate`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          }
+        });
+        if (!active) return;
+        const result = await response.json();
+        if (response.ok && result.translated) {
+          setTranslatedTransparency(result.translated);
+        } else {
+          setTranslationError(result.error || "خطأ في الترجمة");
+        }
+      } catch (err: any) {
+        if (active) {
+          setTranslationError(err?.message || "خطأ في الاتصال بالخادم");
+        }
+      } finally {
+        if (active) {
+          setTranslationLoading(false);
+        }
+      }
+    }
+
+    fetchTranslation();
+
+    return () => {
+      active = false;
     };
-    return map[c.toUpperCase()] || c;
-  };
-  
+  }, [requestId, request?.id, request?.status, request?.updated_at]);
+  const displayTransparency = (showArabicTranslation && translatedTransparency)
+    ? translatedTransparency
+    : transparency;
+
   const [loading, setLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -1207,7 +1216,7 @@ export default function Page({ params }: PageProps) {
         )}
 
         {/* 4. AI Decision Transparency Section */}
-        {transparency && (
+        {displayTransparency && (
           <div className="panel" style={{ border: "1px solid var(--border)", background: "var(--surface)", display: "flex", flexDirection: "column", padding: "16px", gap: "12px" }}>
             <button
               onClick={() => setIsDecisionOpen(!isDecisionOpen)}
@@ -1237,29 +1246,79 @@ export default function Page({ params }: PageProps) {
             {isDecisionOpen && (
               <div style={{ marginTop: "16px", borderTop: "1px solid var(--border)", paddingTop: "16px", display: "flex", flexDirection: "column", gap: "20px", fontSize: "13px" }}>
                 
+                {/* Translation Toggle & Alerts Bar */}
+                <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", alignItems: "center", gap: "10px", paddingBottom: "12px", borderBottom: "1px solid var(--border)" }}>
+                  <div style={{ display: "flex", gap: "8px" }}>
+                    <button
+                      onClick={() => setShowArabicTranslation(true)}
+                      style={{
+                        padding: "4px 10px",
+                        borderRadius: "4px",
+                        border: "1px solid " + (showArabicTranslation ? "var(--green)" : "var(--border)"),
+                        background: showArabicTranslation ? "rgba(16,185,129,0.08)" : "transparent",
+                        color: showArabicTranslation ? "var(--green)" : "var(--muted)",
+                        fontSize: "11px",
+                        cursor: "pointer",
+                        fontWeight: showArabicTranslation ? "bold" : "normal"
+                      }}
+                    >
+                      عرض الترجمة العربية
+                    </button>
+                    <button
+                      onClick={() => setShowArabicTranslation(false)}
+                      style={{
+                        padding: "4px 10px",
+                        borderRadius: "4px",
+                        border: "1px solid " + (!showArabicTranslation ? "var(--green)" : "var(--border)"),
+                        background: !showArabicTranslation ? "rgba(16,185,129,0.08)" : "transparent",
+                        color: !showArabicTranslation ? "var(--green)" : "var(--muted)",
+                        fontSize: "11px",
+                        cursor: "pointer",
+                        fontWeight: !showArabicTranslation ? "bold" : "normal"
+                      }}
+                    >
+                      عرض النص الأصلي (English)
+                    </button>
+                  </div>
+                  
+                  {showArabicTranslation && translationLoading && (
+                    <span style={{ fontSize: "11.5px", color: "var(--amber)", display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                      <Loader2 size={12} className="animate-spin" style={{ color: "var(--amber)" }} />
+                      جارٍ تجهيز الترجمة العربية...
+                    </span>
+                  )}
+
+                  {showArabicTranslation && translationError && (
+                    <span style={{ fontSize: "11.5px", color: "rgb(252,165,165)", display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                      <AlertCircle size={12} />
+                      تعذّر تحميل الترجمة العربية، تم عرض النص الأصلي.
+                    </span>
+                  )}
+                </div>
+
                 {/* 1. Content Analysis */}
                 <div style={{ display: "flex", gap: "12px", alignItems: "start" }}>
                   <div style={{ width: "24px", height: "24px", borderRadius: "50%", background: "rgba(59,130,246,0.08)", display: "grid", placeItems: "center", color: "var(--blue)", fontSize: "11px", fontWeight: "bold", flexShrink: 0 }}>١</div>
                   <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: "6px" }}>
                     <strong style={{ color: "var(--foreground)", fontSize: "13.5px" }}>تحليل محتوى المنشور (Content Analysis):</strong>
-                    {!transparency.contentAnalysis.summary && !transparency.contentAnalysis.detectedObjective && !transparency.contentAnalysis.productType ? (
+                    {!displayTransparency.contentAnalysis.summary && !displayTransparency.contentAnalysis.detectedObjective && !displayTransparency.contentAnalysis.productType ? (
                       <span style={{ color: "var(--muted)", fontStyle: "italic" }}>لم تتوفر بيانات كافية لهذا التحليل.</span>
                     ) : (
                       <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                        {transparency.contentAnalysis.summary ? (
-                          <span style={{ color: "var(--muted)", lineHeight: "1.6" }}>{transparency.contentAnalysis.summary}</span>
+                        {displayTransparency.contentAnalysis.summary ? (
+                          <span style={{ color: "var(--muted)", lineHeight: "1.6" }}>{displayTransparency.contentAnalysis.summary}</span>
                         ) : (
                           <span style={{ color: "var(--muted)", fontStyle: "italic" }}>غير متوفر</span>
                         )}
                         <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginTop: "4px" }}>
-                          {transparency.contentAnalysis.detectedObjective && (
+                          {displayTransparency.contentAnalysis.detectedObjective && (
                             <span className="badge" style={{ background: "rgba(59,130,246,0.08)", color: "var(--blue)", padding: "3px 8px", borderRadius: "4px", fontSize: "11px" }}>
-                              الهدف المكتشف: {translateObjective(transparency.contentAnalysis.detectedObjective)}
+                              الهدف المكتشف: {translateObjective(displayTransparency.contentAnalysis.detectedObjective)}
                             </span>
                           )}
-                          {transparency.contentAnalysis.productType && (
+                          {displayTransparency.contentAnalysis.productType && (
                             <span className="badge" style={{ background: "rgba(255,255,255,0.04)", color: "var(--muted)", padding: "3px 8px", borderRadius: "4px", fontSize: "11px" }}>
-                              نوع الفئة: {transparency.contentAnalysis.productType}
+                              نوع الفئة: {translateCategory(displayTransparency.contentAnalysis.productType)}
                             </span>
                           )}
                         </div>
@@ -1273,32 +1332,32 @@ export default function Page({ params }: PageProps) {
                   <div style={{ width: "24px", height: "24px", borderRadius: "50%", background: "rgba(59,130,246,0.08)", display: "grid", placeItems: "center", color: "var(--blue)", fontSize: "11px", fontWeight: "bold", flexShrink: 0 }}>٢</div>
                   <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: "6px" }}>
                     <strong style={{ color: "var(--foreground)", fontSize: "13.5px" }}>التحليل التاريخي والمنصة (Historical Query):</strong>
-                    {!transparency.historicalAnalysis.rationale && !transparency.historicalAnalysis.bestPattern && transparency.historicalAnalysis.dataUsed === null ? (
+                    {!displayTransparency.historicalAnalysis.rationale && !displayTransparency.historicalAnalysis.bestPattern && displayTransparency.historicalAnalysis.dataUsed === null ? (
                       <span style={{ color: "var(--muted)", fontStyle: "italic" }}>لم تتوفر بيانات كافية لهذا التحليل.</span>
                     ) : (
                       <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                        {transparency.historicalAnalysis.rationale ? (
-                          <span style={{ color: "var(--muted)", lineHeight: "1.6" }}>{transparency.historicalAnalysis.rationale}</span>
+                        {displayTransparency.historicalAnalysis.rationale ? (
+                          <span style={{ color: "var(--muted)", lineHeight: "1.6" }}>{displayTransparency.historicalAnalysis.rationale}</span>
                         ) : (
                           <span style={{ color: "var(--muted)", fontStyle: "italic" }}>غير متوفر</span>
                         )}
-                        {transparency.historicalAnalysis.bestPattern && (
+                        {displayTransparency.historicalAnalysis.bestPattern && (
                           <div style={{ color: "var(--muted)", fontSize: "12px", background: "rgba(255,255,255,0.02)", padding: "8px", borderRadius: "4px", border: "1px solid var(--border)", marginTop: "4px" }}>
-                            <strong>النمط الأفضل أداءً:</strong> {transparency.historicalAnalysis.bestPattern}
+                            <strong>النمط الأفضل أداءً:</strong> {displayTransparency.historicalAnalysis.bestPattern}
                           </div>
                         )}
                         <div style={{ marginTop: "4px" }}>
-                          {transparency.historicalAnalysis.dataUsed === true && (
+                          {displayTransparency.historicalAnalysis.dataUsed === true && (
                             <span className="badge" style={{ background: "rgba(16,185,129,0.08)", color: "var(--green)", padding: "3px 8px", borderRadius: "4px", fontSize: "11px" }}>
                               ✓ تم استخدام البيانات التاريخية للحساب لتحسين النتائج
                             </span>
                           )}
-                          {transparency.historicalAnalysis.dataUsed === false && (
+                          {displayTransparency.historicalAnalysis.dataUsed === false && (
                             <span className="badge" style={{ background: "rgba(251,191,36,0.08)", color: "var(--amber)", padding: "3px 8px", borderRadius: "4px", fontSize: "11px" }}>
                               ⚠ لم يتم استخدام بيانات تاريخية (لا توجد بيانات كافية للحساب)
                             </span>
                           )}
-                          {transparency.historicalAnalysis.dataUsed === null && (
+                          {displayTransparency.historicalAnalysis.dataUsed === null && (
                             <span className="badge" style={{ background: "rgba(255,255,255,0.04)", color: "var(--muted)", padding: "3px 8px", borderRadius: "4px", fontSize: "11px" }}>
                               حالة البيانات التاريخية: غير متوفر
                             </span>
@@ -1314,18 +1373,18 @@ export default function Page({ params }: PageProps) {
                   <div style={{ width: "24px", height: "24px", borderRadius: "50%", background: "rgba(59,130,246,0.08)", display: "grid", placeItems: "center", color: "var(--blue)", fontSize: "11px", fontWeight: "bold", flexShrink: 0 }}>٣</div>
                   <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: "6px" }}>
                     <strong style={{ color: "var(--foreground)", fontSize: "13.5px" }}>تخطيط الجمهور المستهدف (Audience Selection):</strong>
-                    {!transparency.audienceSelection.rationale && 
-                     transparency.audienceSelection.countries.length === 0 && 
-                     transparency.audienceSelection.locations.length === 0 && 
-                     transparency.audienceSelection.placements.length === 0 && 
-                     transparency.audienceSelection.ageMin === null && 
-                     transparency.audienceSelection.ageMax === null && 
-                     transparency.audienceSelection.genders.length === 0 ? (
+                    {!displayTransparency.audienceSelection.rationale && 
+                     displayTransparency.audienceSelection.countries.length === 0 && 
+                     displayTransparency.audienceSelection.locations.length === 0 && 
+                     displayTransparency.audienceSelection.placements.length === 0 && 
+                     displayTransparency.audienceSelection.ageMin === null && 
+                     displayTransparency.audienceSelection.ageMax === null && 
+                     displayTransparency.audienceSelection.genders.length === 0 ? (
                       <span style={{ color: "var(--muted)", fontStyle: "italic" }}>لم تتوفر بيانات كافية لهذا التحليل.</span>
                     ) : (
                       <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                        {transparency.audienceSelection.rationale ? (
-                          <span style={{ color: "var(--muted)", lineHeight: "1.6" }}>{transparency.audienceSelection.rationale}</span>
+                        {displayTransparency.audienceSelection.rationale ? (
+                          <span style={{ color: "var(--muted)", lineHeight: "1.6" }}>{displayTransparency.audienceSelection.rationale}</span>
                         ) : (
                           <span style={{ color: "var(--muted)", fontStyle: "italic" }}>غير متوفر</span>
                         )}
@@ -1335,16 +1394,16 @@ export default function Page({ params }: PageProps) {
                           <div>
                             <span style={{ color: "var(--muted)" }}>الفئة العمرية: </span>
                             <strong>
-                              {transparency.audienceSelection.ageMin !== null && transparency.audienceSelection.ageMax !== null
-                                ? `${transparency.audienceSelection.ageMin} - ${transparency.audienceSelection.ageMax}`
+                              {displayTransparency.audienceSelection.ageMin !== null && displayTransparency.audienceSelection.ageMax !== null
+                                ? `${displayTransparency.audienceSelection.ageMin} - ${displayTransparency.audienceSelection.ageMax}`
                                 : "غير متوفر"}
                             </strong>
                           </div>
                           <div>
                             <span style={{ color: "var(--muted)" }}>الجنس: </span>
                             <strong>
-                              {transparency.audienceSelection.genders.length > 0
-                                ? transparency.audienceSelection.genders.map(g => translateGender(g)).join("، ")
+                              {displayTransparency.audienceSelection.genders.length > 0
+                                ? displayTransparency.audienceSelection.genders.map(g => translateGender(g)).join("، ")
                                 : "غير متوفر"}
                             </strong>
                           </div>
@@ -1354,8 +1413,8 @@ export default function Page({ params }: PageProps) {
                         <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                           <span style={{ color: "var(--muted)", fontSize: "12px" }}>النطاق الجغرافي المستهدف:</span>
                           <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
-                            {transparency.audienceSelection.countries.length > 0 ? (
-                              transparency.audienceSelection.countries.map((c, i) => (
+                            {displayTransparency.audienceSelection.countries.length > 0 ? (
+                              displayTransparency.audienceSelection.countries.map((c, i) => (
                                 <span key={i} style={{ background: "rgba(59,130,246,0.1)", color: "var(--blue)", padding: "2px 6px", borderRadius: "4px", fontSize: "11px", display: "inline-flex", alignItems: "center", gap: "4px" }}>
                                   <MapPin size={10} />
                                   {translateCountry(c)}
@@ -1365,8 +1424,8 @@ export default function Page({ params }: PageProps) {
                               <span style={{ color: "var(--muted)", fontStyle: "italic", fontSize: "12px" }}>الدول: غير متوفر</span>
                             )}
 
-                            {transparency.audienceSelection.locations.length > 0 ? (
-                              transparency.audienceSelection.locations.map((loc, i) => (
+                            {displayTransparency.audienceSelection.locations.length > 0 ? (
+                              displayTransparency.audienceSelection.locations.map((loc, i) => (
                                 <span key={i} style={{ background: "rgba(255,255,255,0.04)", color: "var(--foreground)", padding: "2px 6px", borderRadius: "4px", fontSize: "11px", display: "inline-flex", alignItems: "center", gap: "4px" }}>
                                   <Compass size={10} style={{ color: "var(--muted)" }} />
                                   {loc}
@@ -1380,8 +1439,8 @@ export default function Page({ params }: PageProps) {
                         <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                           <span style={{ color: "var(--muted)", fontSize: "12px" }}>مواضع ظهور الإعلانات (Meta Placements):</span>
                           <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
-                            {transparency.audienceSelection.placements.length > 0 ? (
-                              transparency.audienceSelection.placements.map((p, i) => (
+                            {displayTransparency.audienceSelection.placements.length > 0 ? (
+                              displayTransparency.audienceSelection.placements.map((p, i) => (
                                 <span key={i} style={{ background: "rgba(139,92,246,0.1)", color: "rgb(196,181,253)", padding: "2px 6px", borderRadius: "4px", fontSize: "11px", display: "inline-flex", alignItems: "center", gap: "4px" }}>
                                   <Layers size={10} />
                                   {translatePlacement(p)}
@@ -1403,19 +1462,19 @@ export default function Page({ params }: PageProps) {
                   <div style={{ width: "24px", height: "24px", borderRadius: "50%", background: "rgba(59,130,246,0.08)", display: "grid", placeItems: "center", color: "var(--blue)", fontSize: "11px", fontWeight: "bold", flexShrink: 0 }}>٤</div>
                   <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: "6px" }}>
                     <strong style={{ color: "var(--foreground)", fontSize: "13.5px" }}>توزيع الموازنة والتقديرات المالية (Budgeting):</strong>
-                    {transparency.budgeting.dailyBudget === null && !transparency.budgeting.rationale ? (
+                    {displayTransparency.budgeting.dailyBudget === null && !displayTransparency.budgeting.rationale ? (
                       <span style={{ color: "var(--muted)", fontStyle: "italic" }}>لم تتوفر بيانات كافية لهذا التحليل.</span>
                     ) : (
                       <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                           <span style={{ color: "var(--muted)" }}>الميزانية اليومية الموصى بها: </span>
                           <strong style={{ fontSize: "14px", color: "var(--amber)", display: "inline-flex", alignItems: "center", gap: "2px" }} className="ltr-val">
-                            {transparency.budgeting.dailyBudget !== null ? `${transparency.budgeting.dailyBudget}` : "غير متوفر"}{" "}
-                            {transparency.budgeting.currency || ""}
+                            {displayTransparency.budgeting.dailyBudget !== null ? `${displayTransparency.budgeting.dailyBudget}` : "غير متوفر"}{" "}
+                            {displayTransparency.budgeting.currency || ""}
                           </strong>
                         </div>
-                        {transparency.budgeting.rationale ? (
-                          <span style={{ color: "var(--muted)", lineHeight: "1.6" }}>{transparency.budgeting.rationale}</span>
+                        {displayTransparency.budgeting.rationale ? (
+                          <span style={{ color: "var(--muted)", lineHeight: "1.6" }}>{displayTransparency.budgeting.rationale}</span>
                         ) : (
                           <span style={{ color: "var(--muted)", fontStyle: "italic" }}>غير متوفر</span>
                         )}
@@ -1429,7 +1488,7 @@ export default function Page({ params }: PageProps) {
                   <div style={{ width: "24px", height: "24px", borderRadius: "50%", background: "rgba(59,130,246,0.08)", display: "grid", placeItems: "center", color: "var(--blue)", fontSize: "11px", fontWeight: "bold", flexShrink: 0 }}>٥</div>
                   <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: "6px" }}>
                     <strong style={{ color: "var(--foreground)", fontSize: "13.5px" }}>مراجعة الأمان والامتثال لسياسات Meta (Safety Check):</strong>
-                    {!transparency.safetyCheck.strategy && !transparency.safetyCheck.status && transparency.safetyCheck.compliancePercentage === null && transparency.safetyCheck.warnings.length === 0 ? (
+                    {!displayTransparency.safetyCheck.strategy && !displayTransparency.safetyCheck.status && displayTransparency.safetyCheck.compliancePercentage === null && displayTransparency.safetyCheck.warnings.length === 0 ? (
                       <span style={{ color: "var(--muted)", fontStyle: "italic" }}>لم تتوفر بيانات كافية لهذا التحليل.</span>
                     ) : (
                       <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
@@ -1439,18 +1498,18 @@ export default function Page({ params }: PageProps) {
                           <span style={{ color: "var(--muted)" }}>حالة الأمان والامتثال:</span>
                           
                           {/* Status Badge */}
-                          {transparency.safetyCheck.status ? (
+                          {displayTransparency.safetyCheck.status ? (
                             <span className="badge" style={{
                               background: 
-                                transparency.safetyCheck.status === "Approved" || transparency.safetyCheck.status === "approved" || transparency.safetyCheck.status === "مقبول"
+                                displayTransparency.safetyCheck.status === "Approved" || displayTransparency.safetyCheck.status === "approved" || displayTransparency.safetyCheck.status === "معتمد" || displayTransparency.safetyCheck.status === "مقبول"
                                   ? "rgba(16,185,129,0.08)"
-                                  : (transparency.safetyCheck.status === "Pending Review" || transparency.safetyCheck.status === "pending"
+                                  : (displayTransparency.safetyCheck.status === "Pending Review" || displayTransparency.safetyCheck.status === "pending" || displayTransparency.safetyCheck.status === "pending_review" || displayTransparency.safetyCheck.status === "بانتظار المراجعة"
                                       ? "rgba(251,191,36,0.08)"
                                       : "rgba(239,68,68,0.08)"),
                               color: 
-                                transparency.safetyCheck.status === "Approved" || transparency.safetyCheck.status === "approved" || transparency.safetyCheck.status === "مقبول"
+                                displayTransparency.safetyCheck.status === "Approved" || displayTransparency.safetyCheck.status === "approved" || displayTransparency.safetyCheck.status === "معتمد" || displayTransparency.safetyCheck.status === "مقبول"
                                   ? "var(--green)"
-                                  : (transparency.safetyCheck.status === "Pending Review" || transparency.safetyCheck.status === "pending"
+                                  : (displayTransparency.safetyCheck.status === "Pending Review" || displayTransparency.safetyCheck.status === "pending" || displayTransparency.safetyCheck.status === "pending_review" || displayTransparency.safetyCheck.status === "بانتظار المراجعة"
                                       ? "var(--amber)"
                                       : "rgb(252,165,165)"),
                               padding: "2px 8px",
@@ -1458,41 +1517,37 @@ export default function Page({ params }: PageProps) {
                               fontSize: "11px",
                               fontWeight: "600"
                             }}>
-                              {transparency.safetyCheck.status === "Approved" || transparency.safetyCheck.status === "approved"
-                                ? "آمن ومتوافق (Approved)"
-                                : (transparency.safetyCheck.status === "Pending Review" || transparency.safetyCheck.status === "pending"
-                                    ? "قيد المراجعة البشرية"
-                                    : transparency.safetyCheck.status)}
+                              {translateStatus(displayTransparency.safetyCheck.status)}
                             </span>
                           ) : (
                             <span style={{ color: "var(--muted)", fontStyle: "italic" }}>غير متوفر</span>
                           )}
 
                           {/* Compliance Score Badge */}
-                          {transparency.safetyCheck.compliancePercentage !== null ? (
+                          {displayTransparency.safetyCheck.compliancePercentage !== null ? (
                             <span className="badge ltr-val" style={{ background: "rgba(255,255,255,0.04)", color: "var(--foreground)", padding: "2px 8px", borderRadius: "4px", fontSize: "11px", fontWeight: "600" }}>
-                              {transparency.safetyCheck.compliancePercentage}% امتثال
+                              {displayTransparency.safetyCheck.compliancePercentage}% امتثال
                             </span>
                           ) : (
                             <span style={{ color: "var(--muted)", fontStyle: "italic" }}>غير متوفر</span>
                           )}
                         </div>
 
-                        {transparency.safetyCheck.strategy ? (
-                          <span style={{ color: "var(--muted)", lineHeight: "1.6" }}>{transparency.safetyCheck.strategy}</span>
+                        {displayTransparency.safetyCheck.strategy ? (
+                          <span style={{ color: "var(--muted)", lineHeight: "1.6" }}>{displayTransparency.safetyCheck.strategy}</span>
                         ) : (
                           <span style={{ color: "var(--muted)", fontStyle: "italic" }}>غير متوفر</span>
                         )}
 
                         {/* Safety Warnings List */}
-                        {transparency.safetyCheck.warnings.length > 0 && (
+                        {displayTransparency.safetyCheck.warnings.length > 0 && (
                           <div style={{ display: "flex", flexDirection: "column", gap: "4px", marginTop: "4px" }}>
                             <span style={{ color: "rgb(252,165,165)", fontSize: "11.5px", fontWeight: "600", display: "flex", alignItems: "center", gap: "4px" }}>
                               <ShieldAlert size={12} />
-                              التنبيهات والملاحظات الإرشادية ({transparency.safetyCheck.warnings.length}):
+                              التنبيهات والملاحظات الإرشادية ({displayTransparency.safetyCheck.warnings.length}):
                             </span>
                             <div style={{ display: "flex", flexDirection: "column", gap: "4px", paddingRight: "8px" }}>
-                              {transparency.safetyCheck.warnings.map((warn, i) => (
+                              {displayTransparency.safetyCheck.warnings.map((warn, i) => (
                                 <div key={i} style={{ color: "var(--muted)", fontSize: "12px", display: "flex", gap: "6px", alignItems: "start" }}>
                                   <span style={{ color: "var(--amber)" }}>•</span>
                                   <span style={{ lineHeight: "1.5" }}>{warn}</span>
