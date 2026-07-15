@@ -12,6 +12,12 @@ export async function POST(
     const body = await request.json().catch(() => ({}));
     const { tier } = body;
 
+    // Validate UUID format
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!requestId || !uuidRegex.test(requestId)) {
+      return NextResponse.json({ error: "معرف الطلب غير صالح (UUID format required)" }, { status: 400 });
+    }
+
     if (!tier || !["conservative", "balanced", "aggressive"].includes(tier)) {
       return NextResponse.json({ error: "الرجاء اختيار خيار استراتيجية صالح (tier)." }, { status: 400 });
     }
@@ -19,6 +25,13 @@ export async function POST(
     const mockMode = process.env.CAMPAIGN_CENTER_MOCK_MODE === "true";
     const webhookUrl = process.env.N8N_WS04_BUILDER_WEBHOOK_URL;
     const secret = process.env.N8N_CAMPAIGN_WEBHOOK_SECRET;
+
+    console.log("[WS04_ROUTE_RECEIVED]", {
+      requestId,
+      tier
+    });
+
+    console.log("[WS04_WEBHOOK_CONFIGURED]", Boolean(webhookUrl));
 
     const supabase = await createClient();
 
@@ -143,7 +156,17 @@ export async function POST(
         clearTimeout(timeout);
 
         if (response.ok) {
-          const data = await response.json().catch(() => ({}));
+          const responseBody = await response.text();
+          console.log("[WS04_N8N_RESPONSE]", {
+            status: response.status,
+            body: responseBody
+          });
+
+          let data = {};
+          try {
+            data = JSON.parse(responseBody);
+          } catch (e) {}
+
           const isTransient = checkIfTransientMetaError(data);
 
           if (isTransient && attempt < retrySchedule.length) {

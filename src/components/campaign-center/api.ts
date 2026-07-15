@@ -162,18 +162,18 @@ export async function selectStrategy(requestId: string, tier: 'conservative' | '
 }
 
 export async function buildCampaign(requestId: string, tier: 'conservative' | 'balanced' | 'aggressive'): Promise<ApiResponse<CampaignCreationRequest>> {
-  try {
-    const res = await fetchWithTimeout("/api/campaigns/" + requestId + "/build", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ tier }),
-    }, 25000);
-    const data = await res.json();
-    if (!res.ok) return { error: data.error || "فشل بناء الحملة" };
-    return { data };
-  } catch (err) {
-    return { error: err instanceof Error ? err.message : "فشل بناء الحملة" };
+  const res = await fetchWithTimeout(`/api/campaigns/${requestId}/build`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    cache: "no-store",
+    body: JSON.stringify({ tier }),
+  }, 25000);
+
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || `HTTP error ${res.status}: فشل بناء الحملة`);
   }
+  return { data };
 }
 
 export async function fetchRequests(): Promise<ApiResponse<CampaignCreationRequest[]>> {
