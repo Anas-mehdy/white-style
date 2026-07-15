@@ -82,6 +82,7 @@ export interface CampaignCreationRequest {
   selected_strategy?: string | null;
   execution_timeline?: Array<{ event: string; timestamp: string }>;
   campaign_strategies?: CampaignStrategy[];
+  recommended_tier?: string | null;
 }
 
 export interface CampaignStrategy {

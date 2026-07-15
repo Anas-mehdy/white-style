@@ -2,8 +2,9 @@
 
 import { Shell } from "@/components/dashboard";
 import { useState, useEffect, useRef, use } from "react";
-import { fetchRequestDetails, buildCampaign, generateStrategy } from "@/components/campaign-center/api";
+import { fetchRequestDetails, buildCampaign, generateStrategy, selectStrategy } from "@/components/campaign-center/api";
 import { CampaignCreationRequest, CampaignStrategy } from "@/components/campaign-center/types";
+import { StrategyCard } from "@/components/campaign-center/strategy-card";
 import { 
   X, 
   CheckCircle2, 
@@ -61,6 +62,7 @@ export default function Page({ params }: PageProps) {
   const [strategyError, setStrategyError] = useState<string | null>(null);
   const [buildError, setBuildError] = useState<string | null>(null);
   const [isStaleDataState, setIsStaleDataState] = useState<boolean>(false);
+  const [isSelecting, setIsSelecting] = useState<boolean>(false);
 
   const strategyTriggeredRef = useRef(false);
   const buildTriggeredRef = useRef(false);
@@ -106,6 +108,70 @@ export default function Page({ params }: PageProps) {
     };
   }, [requestId]);
 
+  // useEffect for automatic campaign building trigger
+  useEffect(() => {
+    if (!request || loading) return;
+
+    const req = request;
+    const strats = strategies;
+    
+    // Resolve selected strategy tier robustly
+    const selectedTier = resolveSelectedTier(req, strats);
+    
+    // Safety checks
+    const safetyReviewObj = req.request_payload?.safety_review;
+    const safetyApproved = safetyReviewObj ? safetyReviewObj.approved === true : true;
+    const isSafetyRejected = safetyReviewObj && safetyReviewObj.approved === false;
+    
+    const validModes = ["dry_run", "review", "live"];
+    const isValidMode = validModes.includes(req.execution_mode || "");
+    
+    const selectedStrat = strats?.find((s) => s.selected === true) ?? null;
+    const selectedCount = strats?.filter((s) => s.selected === true).length || 0;
+    
+    const hasMetaIds = !!selectedStrat?.meta_campaign_id ||
+                       !!selectedStrat?.meta_adset_id ||
+                       !!selectedStrat?.meta_creative_id ||
+                       !!selectedStrat?.meta_ad_id ||
+                       !!req.selected_strategy; // check any Meta IDs exist
+
+    const isDryRunCompleted = req.request_payload?.build_progress?.stage === "dry_run_completed";
+
+    // Trace auto-build conditions diagnostics
+    console.log("[WS04_TRIGGER_DIAGNOSTICS]", {
+      requestId: req.id,
+      status: req.status,
+      expertMode,
+      selectedTier,
+      safetyApproved,
+      isSafetyRejected,
+      selectedCount,
+      hasMetaIds,
+      isDryRunCompleted,
+      alreadyTriggered: buildTriggeredRef.current,
+      isAutoBuilding
+    });
+
+    // Check conditions
+    if (
+      expertMode === false &&
+      req.status === "strategy_ready" &&
+      selectedTier &&
+      safetyApproved &&
+      !isSafetyRejected &&
+      !hasMetaIds &&
+      !isDryRunCompleted &&
+      !isAutoBuilding &&
+      !["building", "ready_for_review", "approved", "published", "failed"].includes(req.status)
+    ) {
+      if (!buildTriggeredRef.current) {
+        // Set guard ref immediately before sending the API request
+        buildTriggeredRef.current = true;
+        triggerAutoBuild(selectedTier);
+      }
+    }
+  }, [request, strategies, expertMode, isAutoBuilding, buildError]);
+
   const loadDetails = async () => {
     setLoading(true);
     setErrorMessage(null);
@@ -143,10 +209,15 @@ export default function Page({ params }: PageProps) {
   };
 
   const resolveSelectedTier = (req: CampaignCreationRequest, strats: CampaignStrategy[]) => {
-    const selectedStrat = strats?.find((strategy) => strategy.selected === true) ?? null;
+    const selectedStrat = strats?.find(
+      (strategy) =>
+        strategy.selected === true ||
+        strategy.status === "selected"
+    ) ?? null;
     return (
       req.selected_strategy ??
       selectedStrat?.tier ??
+      req.recommended_tier ??
       req.request_payload?.selected_strategy_tier ??
       req.request_payload?.safety_review?.recommended_tier ??
       req.request_payload?.campaign_strategy?.recommended_tier ??
@@ -189,59 +260,7 @@ export default function Page({ params }: PageProps) {
       }
     } else if (req.status === "strategy_ready") {
       setIsStaleDataState(false);
-      // Check if we should automatically promote (expertMode = OFF)
-      if (expertMode === false && !isAutoBuilding) {
-        // Resolve selected strategy tier robustly
-        const selectedTier = resolveSelectedTier(req, strats);
-        
-        // Safety checks
-        const safetyApproved = req.request_payload?.safety_review?.approved === true;
-        const safeToBuild = req.request_payload?.safety_review?.final_strategy?.safe_to_build !== false;
-        
-        const validModes = ["dry_run", "review", "live"];
-        const isValidMode = validModes.includes(req.execution_mode || "");
-        
-        const selectedStrat = strats?.find((s) => s.selected === true) ?? null;
-        const selectedCount = strats?.filter((s) => s.selected === true).length || 0;
-        
-        const hasMetaIds = !!selectedStrat?.meta_campaign_id ||
-                           !!selectedStrat?.meta_adset_id ||
-                           !!selectedStrat?.meta_creative_id ||
-                           !!selectedStrat?.meta_ad_id;
-
-        const isDryRunCompleted = req.request_payload?.build_progress?.stage === "dry_run_completed";
-
-        console.log("[WS04_TRIGGER_CHECK]", {
-          requestId,
-          status: req.status,
-          expertMode,
-          selectedTier,
-          safetyApproved,
-          selectedCount,
-          alreadyTriggered: buildTriggeredRef.current,
-          metaCampaignId: selectedStrat?.meta_campaign_id,
-          metaAdsetId: selectedStrat?.meta_adset_id,
-          metaCreativeId: selectedStrat?.meta_creative_id,
-          metaAdId: selectedStrat?.meta_ad_id
-        });
-
-        if (
-          selectedTier &&
-          selectedCount === 1 &&
-          safetyApproved &&
-          safeToBuild &&
-          isValidMode &&
-          !hasMetaIds &&
-          !isDryRunCompleted &&
-          !buildTriggeredRef.current
-        ) {
-          buildTriggeredRef.current = true;
-          triggerAutoBuild(selectedTier);
-        }
-      } else if (expertMode === true) {
-        // If expert mode is ON, we shouldn't be on the building page while in strategy_ready state
-        router.push(`/campaigns/${requestId}/strategy`);
-      }
+      // Auto-triggering and strategy selections are handled declaratively by useEffect and UI panels
     }
   };
 
@@ -280,6 +299,28 @@ export default function Page({ params }: PageProps) {
       console.error("[Auto-Build] Failed to trigger build campaign:", err);
       setIsAutoBuilding(false);
       setBuildError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const handleSelectTier = async (tier: 'conservative' | 'balanced' | 'aggressive') => {
+    if (isSelecting) return;
+    setIsSelecting(true);
+    setErrorMessage(null);
+    try {
+      const res = await selectStrategy(requestId, tier);
+      if (res.error) {
+        setErrorMessage(res.error);
+      } else if (res.data) {
+        const updated = await fetchRequestDetails(requestId);
+        if (updated.data) {
+          setRequest(updated.data.request);
+          setStrategies(updated.data.strategies);
+        }
+      }
+    } catch (e) {
+      setErrorMessage("فشل في اختيار الاستراتيجية.");
+    } finally {
+      setIsSelecting(false);
     }
   };
 
@@ -335,53 +376,8 @@ export default function Page({ params }: PageProps) {
         }
 
         // Check auto-build in polling loop if state changes to strategy_ready
-        if (reqData.status === "strategy_ready" && expertMode === false && !isAutoBuilding) {
+        if (reqData.status === "strategy_ready") {
           setIsStaleDataState(false);
-          const selectedTier = resolveSelectedTier(reqData, strats);
-          
-          const safetyApproved = reqData.request_payload?.safety_review?.approved === true;
-          const safeToBuild = reqData.request_payload?.safety_review?.final_strategy?.safe_to_build !== false;
-          
-          const validModes = ["dry_run", "review", "live"];
-          const isValidMode = validModes.includes(reqData.execution_mode || "");
-          
-          const selectedStrat = strats?.find((s) => s.selected === true) ?? null;
-          const selectedCount = strats?.filter((s) => s.selected === true).length || 0;
-          
-          const hasMetaIds = !!selectedStrat?.meta_campaign_id ||
-                             !!selectedStrat?.meta_adset_id ||
-                             !!selectedStrat?.meta_creative_id ||
-                             !!selectedStrat?.meta_ad_id;
-
-          const isDryRunCompleted = reqData.request_payload?.build_progress?.stage === "dry_run_completed";
-
-          console.log("[WS04_TRIGGER_CHECK]", {
-            requestId,
-            status: reqData.status,
-            expertMode,
-            selectedTier,
-            safetyApproved,
-            selectedCount,
-            alreadyTriggered: buildTriggeredRef.current,
-            metaCampaignId: selectedStrat?.meta_campaign_id,
-            metaAdsetId: selectedStrat?.meta_adset_id,
-            metaCreativeId: selectedStrat?.meta_creative_id,
-            metaAdId: selectedStrat?.meta_ad_id
-          });
-
-          if (
-            selectedTier &&
-            selectedCount === 1 &&
-            safetyApproved &&
-            safeToBuild &&
-            isValidMode &&
-            !hasMetaIds &&
-            !isDryRunCompleted &&
-            !buildTriggeredRef.current
-          ) {
-            buildTriggeredRef.current = true;
-            triggerAutoBuild(selectedTier);
-          }
         }
 
         const stopStatuses = ["ready_for_review", "approved", "published", "failed"];
@@ -502,18 +498,21 @@ export default function Page({ params }: PageProps) {
 
       case 9: // Configuring Meta Ad Set
         if (hasAdset) return "completed";
+        if (buildError) return "failed";
         if (hasCampaign) return "running";
         if (isFailed && !hasAdset && hasCampaign) return "failed";
         return "pending";
 
       case 10: // Uploading Ad Creative
         if (hasCreative) return "completed";
+        if (buildError) return "failed";
         if (hasAdset) return "running";
         if (isFailed && !hasCreative && hasAdset) return "failed";
         return "pending";
 
       case 11: // Deploying Live Advertisement
         if (hasAd || ["ready_for_review", "approved", "published"].includes(status)) return "completed";
+        if (buildError) return "failed";
         if (hasCreative) return "running";
         if (isFailed && !hasAd && hasCreative) return "failed";
         return "pending";
@@ -545,8 +544,8 @@ export default function Page({ params }: PageProps) {
     );
   }
 
-  const isFailed = request.status === "failed";
-  const isBuildingActive = request.status === "building" || request.status === "analyzing" || request.status === "draft";
+  const isFailed = request.status === "failed" || request.status === "resolution_failed";
+  const isBuildingActive = ["draft", "analyzing", "strategy_ready", "strategy_review_required", "building"].includes(request.status);
   const isReady = ["ready_for_review", "approved", "published"].includes(request.status);
 
   // Format events logs
@@ -581,6 +580,88 @@ export default function Page({ params }: PageProps) {
             تحديث البيانات
           </button>
         </div>
+
+        {/* State Machine Status Alert Banner */}
+        {(() => {
+          const status = request.status;
+          const payload = request.request_payload || {};
+          const resolverStatus = payload.resolver_status;
+          const selectedTier = resolveSelectedTier(request, strategies);
+          
+          let alertTitle = "";
+          let alertDesc = "";
+          let alertType: "info" | "warning" | "success" | "error" = "info";
+
+          if (isStaleDataState) {
+            alertTitle = "تم اكتشاف بيانات متبقية من محاولة سابقة";
+            alertDesc = "يوجد استراتيجيات سابقة مسجلة لهذا الطلب المسودة. يرجى النقر على زر تنظيف البيانات وإعادة التشغيل أدناه للبدء من جديد.";
+            alertType = "warning";
+          } else if (isFailed) {
+            alertTitle = "تعذر تشييد الحملة تلقائياً";
+            alertDesc = request.error_message || "حدث خطأ أثناء محاولة الاتصال بخدمات Meta الإعلانية. يرجى مراجعة سجل العمليات التقني أدناه.";
+            alertType = "error";
+          } else if (isReady) {
+            alertTitle = "تم ترويج وبناء الحملة بنجاح على Meta ✅";
+            alertDesc = "الحملة الإعلانية بكامل تفاصيلها منشأة وموقوفة مؤقتاً (PAUSED) لضمان الأمان والمراجعة التامة.";
+            alertType = "success";
+          } else if (status === "building") {
+            alertTitle = "جاري تشييد عناصر الحملة الإعلانية على فيسبوك...";
+            alertDesc = "يتم الآن إنشاء المجموعات الإعلانية وتصميمات الإعلانات وتعيين الاستهداف على مدير إعلانات Meta Ads Manager.";
+            alertType = "info";
+          } else if (isAutoBuilding) {
+            alertTitle = "جاري بدء بناء الحملة على Meta...";
+            alertDesc = "يقوم النظام بالاتصال بخدمات فيسبوك الرسمية لتسجيل الحملة الإعلانية وإرسال المكونات.";
+            alertType = "info";
+          } else if (status === "strategy_ready") {
+            if (expertMode === true) {
+              alertTitle = "مراجعة واعتماد الاستراتيجية المطلوبة (Expert Mode)";
+              alertDesc = "يرجى تحديد فئة الاستهداف والميزانية المناسبة من الخيارات المعروضة أدناه لاعتماد الحملة.";
+              alertType = "warning";
+            } else {
+              alertTitle = "تم اختيار الاستراتيجية تلقائيًا، جارٍ بدء بناء الحملة...";
+              alertDesc = "تم تحليل المنشور بنجاح واختيار فئة الاستهداف الموصى بها. جاري تشغيل وحدة بناء الحملة تلقائياً.";
+              alertType = "success";
+            }
+          } else if (status === "analyzing" || (status === "draft" && resolverStatus === "resolved")) {
+            alertTitle = "جاري تشغيل تحليل الذكاء الاصطناعي...";
+            alertDesc = "يقوم محرك الذكاء الاصطناعي بتحليل جودة المنشور وتجهيز خيارات الميزانية والاستهداف الموصى بها (WS-03).";
+            alertType = "info";
+          } else {
+            alertTitle = "جاري استقبال وحل رابط المنشور...";
+            alertDesc = "يقوم المحرك بقراءة بيانات المنشور والصور والتعليقات لبدء التحليل (WS-02).";
+            alertType = "info";
+          }
+
+          let alertBg = "rgba(59,130,246,0.08)";
+          let alertBorder = "rgba(59,130,246,0.2)";
+          let alertColor = "var(--blue)";
+          
+          if (alertType === "warning") {
+            alertBg = "rgba(245,158,11,0.08)";
+            alertBorder = "rgba(245,158,11,0.2)";
+            alertColor = "var(--amber)";
+          } else if (alertType === "success") {
+            alertBg = "rgba(16, 185, 129, 0.08)";
+            alertBorder = "rgba(16, 185, 129, 0.2)";
+            alertColor = "var(--green)";
+          } else if (alertType === "error") {
+            alertBg = "rgba(239,68,68,0.08)";
+            alertBorder = "rgba(239,68,68,0.2)";
+            alertColor = "var(--red)";
+          }
+
+          return (
+            <div className="panel" style={{ background: alertBg, border: `1px solid ${alertBorder}`, borderRadius: "8px", padding: "16px", display: "flex", flexDirection: "column", gap: "6px", direction: "rtl", textAlign: "right" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", color: alertColor }}>
+                <Info size={20} />
+                <strong style={{ fontSize: "14px" }}>{alertTitle}</strong>
+              </div>
+              <p style={{ fontSize: "13px", color: "var(--muted)", margin: 0, lineHeight: "1.5" }}>
+                {alertDesc}
+              </p>
+            </div>
+          );
+        })()}
 
         {/* Global Error Banner */}
         {errorMessage && (
@@ -752,6 +833,88 @@ export default function Page({ params }: PageProps) {
                     </div>
                   );
                 })}
+
+                {/* Case 1: Expert Mode strategy cards selection */}
+                {expertMode === true && request.status === "strategy_ready" && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "16px", borderTop: "1px solid var(--border)", paddingTop: "18px", marginTop: "14px" }}>
+                    <h3 style={{ fontSize: "14px", fontWeight: "700", color: "var(--foreground)" }}>
+                      <Sparkles size={16} style={{ color: "var(--amber)", display: "inline-block", marginLeft: "6px", verticalAlign: "middle" }} />
+                      مراجعة واعتماد الاستراتيجية المطلوبة (Expert Mode)
+                    </h3>
+                    <p style={{ fontSize: "12.5px", color: "var(--muted)", margin: 0, lineHeight: "1.5" }}>
+                      الرجاء تحديد فئة الاستهداف اليومية والميزانية المناسبة لاعتمادها وبدء البناء التلقائي على Meta.
+                    </p>
+                    
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: "12px", marginTop: "8px" }}>
+                      {strategies.map((strat) => (
+                        <StrategyCard
+                          key={strat.tier}
+                          strategy={strat}
+                          isSelected={selectedStrategy?.tier === strat.tier}
+                          onSelect={() => handleSelectTier(strat.tier)}
+                          disabled={isSelecting}
+                        />
+                      ))}
+                    </div>
+
+                    <button
+                      onClick={async () => {
+                        const tier = selectedStrategy?.tier || resolveSelectedTier(request, strategies);
+                        if (tier) {
+                          buildTriggeredRef.current = true;
+                          await triggerAutoBuild(tier);
+                        }
+                      }}
+                      disabled={isAutoBuilding}
+                      className="sync-button"
+                      style={{
+                        background: "var(--brand-gradient)",
+                        borderColor: "transparent",
+                        color: "white",
+                        fontWeight: "700",
+                        padding: "10px 24px",
+                        justifyContent: "center",
+                        marginTop: "12px",
+                        fontSize: "13px",
+                        cursor: "pointer"
+                      }}
+                    >
+                      {isAutoBuilding ? "جاري بدء البناء..." : "اعتماد الاستراتيجية وإنشاء الحملة"}
+                    </button>
+                  </div>
+                )}
+
+                {/* Case 2: Auto Mode Manual Fallback Build Button */}
+                {expertMode === false && request.status === "strategy_ready" && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "12px", borderTop: "1px solid var(--border)", paddingTop: "18px", marginTop: "14px" }}>
+                    <p style={{ fontSize: "12.5px", color: "var(--muted)", margin: 0, lineHeight: "1.5" }}>
+                      إذا لم يبدأ بناء الحملة تلقائياً خلال لحظات، يمكنك تفعيل عملية البناء يدوياً باستخدام الزر أدناه:
+                    </p>
+                    <button
+                      onClick={async () => {
+                        const tier = resolveSelectedTier(request, strategies);
+                        if (tier) {
+                          buildTriggeredRef.current = true;
+                          await triggerAutoBuild(tier);
+                        }
+                      }}
+                      disabled={isAutoBuilding}
+                      className="sync-button"
+                      style={{
+                        background: "var(--brand-gradient)",
+                        borderColor: "transparent",
+                        color: "white",
+                        fontWeight: "700",
+                        padding: "10px 24px",
+                        justifyContent: "center",
+                        fontSize: "13px",
+                        cursor: "pointer"
+                      }}
+                    >
+                      {isAutoBuilding ? "جاري بدء البناء..." : "متابعة وإنشاء الحملة"}
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
 
