@@ -545,7 +545,7 @@ button { cursor: pointer; }
 
 @media (max-width: 1024px) {
   .mobile-topbar {
-    display: flex;
+    display: flex !important;
   }
   .main-content {
     margin-right: 0;
