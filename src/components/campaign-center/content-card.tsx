@@ -88,12 +88,12 @@ export function ContentCard({
         {/* AI Candidate Badge (Top Left) */}
         {(() => {
           const scoreVal = Math.min(98, Math.max(34, Math.round(60 + (item.likes_count * 0.15) + (item.comments_count * 0.45))));
+          if (scoreVal < 70) {
+            return null;
+          }
           let badgeText = "مرشح ممتاز";
           let badgeColor = "var(--green)";
-          if (scoreVal < 70) {
-            badgeText = "مرشح ضعيف";
-            badgeColor = "var(--muted)";
-          } else if (scoreVal < 90) {
+          if (scoreVal < 90) {
             badgeText = "مرشح جيد";
             badgeColor = "var(--amber)";
           }
