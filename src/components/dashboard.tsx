@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Activity, BrainCircuit, LayoutDashboard, RefreshCw, Settings2, ShieldCheck, Target, Sun, Moon, Rocket } from "lucide-react";
+import { Activity, BrainCircuit, LayoutDashboard, RefreshCw, Settings2, ShieldCheck, Target, Sun, Moon, Rocket, Menu, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { AccountRow, ChartPoint } from "@/lib/dashboard-data";
 import { isDashboardApiResponse, type DashboardApiResponse } from "@/types/dashboard";
@@ -29,22 +29,125 @@ const formatNumber = (n: number) =>
 
 export function Shell({ children }: { children: React.ReactNode }) {
   const p = usePathname();
+  const [isOpen, setIsOpen] = useState(false);
+  const hamburgerRef = useRef<HTMLButtonElement>(null);
+  const sidebarRef = useRef<HTMLElement>(null);
+  const isFirstMount = useRef(true);
+
+  // Close sidebar on page navigation
+  useEffect(() => {
+    setIsOpen(false);
+  }, [p]);
+
+  // Handle screen resize: close sidebar drawer if screen width expands to Desktop (> 1024px)
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth > 1024) {
+        setIsOpen(false);
+      }
+    };
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  // Body Scroll Lock & Restore
+  useEffect(() => {
+    if (isOpen) {
+      const originalOverflow = document.body.style.overflow;
+      document.body.style.overflow = "hidden";
+      return () => {
+        document.body.style.overflow = originalOverflow;
+      };
+    }
+  }, [isOpen]);
+
+  // Close on Escape key
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setIsOpen(false);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen]);
+
+  // Accessibility Focus Transfer
+  useEffect(() => {
+    if (isFirstMount.current) {
+      isFirstMount.current = false;
+      return;
+    }
+    if (isOpen) {
+      sidebarRef.current?.focus();
+    } else {
+      hamburgerRef.current?.focus();
+    }
+  }, [isOpen]);
+
   return (
     <div className="app-shell">
-      <aside className="sidebar">
-        <div className="brand">
-          <div className="brand-mark">WS</div>
-          <div>
-            <strong>White Style</strong>
-            <span>Smart Agent</span>
-          </div>
+      {/* Mobile Topbar */}
+      <header className="mobile-topbar">
+        <button
+          ref={hamburgerRef}
+          onClick={() => setIsOpen(true)}
+          className="menu-toggle-btn"
+          aria-label="افتح القائمة الجانبية"
+          aria-expanded={isOpen}
+          aria-controls="sidebar-menu"
+        >
+          <Menu size={24} />
+        </button>
+        <div className="mobile-topbar-brand">
+          <div className="brand-mark" style={{ width: "32px", height: "32px", borderRadius: "8px", fontSize: "11px", boxShadow: "none" }}>WS</div>
+          <strong>White Style</strong>
+          <span style={{ fontSize: "10px", marginRight: "4px", color: "var(--muted)" }}>Smart Agent</span>
         </div>
-        <nav className="sidebar-nav">
+      </header>
+
+      {/* Backdrop Overlay */}
+      {isOpen && (
+        <div 
+          className="mobile-sidebar-overlay" 
+          onClick={() => setIsOpen(false)}
+        />
+      )}
+
+      {/* Sidebar Navigation */}
+      <aside
+        id="sidebar-menu"
+        ref={sidebarRef}
+        tabIndex={-1}
+        className={`sidebar ${isOpen ? "sidebar--open" : ""}`}
+        style={{ outline: "none" }}
+      >
+        <div className="brand" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "11px" }}>
+            <div className="brand-mark">WS</div>
+            <div>
+              <strong>White Style</strong>
+              <span>Smart Agent</span>
+            </div>
+          </div>
+          <button
+            onClick={() => setIsOpen(false)}
+            className="sidebar-close-btn"
+            aria-label="أغلق القائمة الجانبية"
+            style={{ display: "grid", placeItems: "center" }}
+          >
+            <X size={20} />
+          </button>
+        </div>
+        <nav className="sidebar-nav" style={{ marginTop: "20px" }}>
           {nav.map(([h, l, I]) => (
             <Link
               key={h}
               href={h}
+              onClick={() => setIsOpen(false)}
               className={p === h ? "nav-item nav-item--active" : "nav-item"}
+              style={{ padding: "12px 14px" }}
             >
               <I size={19} />
               <span>{l}</span>
@@ -101,9 +204,9 @@ export function PageHeader({ title }: { title: string }) {
         >
           {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
         </button>
-        <button className="sync-button" onClick={() => r.refresh()}>
+        <button className="sync-button" onClick={() => r.refresh()} title="تحديث الصفحة">
           <RefreshCw size={16} />
-          تحديث الصفحة
+          <span className="hide-mobile">تحديث الصفحة</span>
         </button>
       </div>
     </header>
@@ -114,6 +217,16 @@ function Chart({ points, loading }: { points: ChartPoint[]; loading: boolean }) 
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
   const [theme, setTheme] = useState<"dark" | "light">("dark");
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const checkSize = () => {
+      setIsMobile(window.innerWidth <= 1024);
+    };
+    checkSize();
+    window.addEventListener("resize", checkSize);
+    return () => window.removeEventListener("resize", checkSize);
+  }, []);
 
   useEffect(() => {
     const current = (localStorage.getItem("theme") || "dark") as "dark" | "light";
@@ -166,14 +279,19 @@ function Chart({ points, loading }: { points: ChartPoint[]; loading: boolean }) 
   const maxSpendScaled = maxSpend > 0 ? Math.ceil(maxSpend * 1.1) : 100;
   const maxConvScaled = maxConv > 0 ? Math.ceil(maxConv * 1.1) : 10;
 
-  // viewBox is 500x150 (Reduced by ~31.8% from 220 for better layout balance).
-  // Margins: Left: 65, Right: 65, Top: 30 (gives space for title & axis headers), Bottom: 25
-  const marginL = 65;
-  const marginR = 65;
-  const marginT = 30;
-  const marginB = 25;
+  // Responsive viewBox & Margins: Height: 380 on mobile vs 150 on desktop
+  const viewBoxHeight = isMobile ? 380 : 150;
+  const marginL = isMobile ? 50 : 65;
+  const marginR = isMobile ? 50 : 65;
+  const marginT = isMobile ? 55 : 30;
+  const marginB = isMobile ? 35 : 25;
   const plotW = 500 - marginL - marginR;
-  const plotH = 150 - marginT - marginB; // 95 pixels
+  const plotH = viewBoxHeight - marginT - marginB;
+
+  // Responsive fonts inside SVG
+  const fontSizeAxis = isMobile ? 11 : 8;
+  const fontSizeLabel = isMobile ? 10.5 : 7.5;
+  const fontSizeTitle = isMobile ? 13.5 : 10.5;
 
   const getX = (idx: number) => {
     if (activePoints.length <= 1) return marginL + plotW / 2;
@@ -322,7 +440,7 @@ function Chart({ points, loading }: { points: ChartPoint[]; loading: boolean }) 
 
       <svg
         ref={svgRef}
-        viewBox="0 0 500 150"
+        viewBox={`0 0 500 ${viewBoxHeight}`}
         width="100%"
         height="100%"
         preserveAspectRatio="xMidYMid meet"
@@ -331,15 +449,15 @@ function Chart({ points, loading }: { points: ChartPoint[]; loading: boolean }) 
         style={{ overflow: "visible" }}
       >
         {/* Title */}
-        <text x="250" y="14" textAnchor="middle" fontSize="10.5" fontWeight="700" fill="var(--foreground)">
+        <text x="250" y="22" textAnchor="middle" fontSize={fontSizeTitle} fontWeight="700" fill="var(--foreground)">
           أداء الإنفاق والمحادثات خلال الفترة المحددة
         </text>
 
         {/* Y Axis Titles */}
-        <text x={marginL - 8} y="26" textAnchor="end" fontSize="8" fontWeight="600" fill="var(--chart-spend)">
+        <text x={marginL - 8} y={isMobile ? "42" : "26"} textAnchor="end" fontSize={fontSizeAxis} fontWeight="600" fill="var(--chart-spend)">
           الإنفاق (USD)
         </text>
-        <text x={500 - marginR + 8} y="26" textAnchor="start" fontSize="8" fontWeight="600" fill="var(--chart-conv)">
+        <text x={500 - marginR + 8} y={isMobile ? "42" : "26"} textAnchor="start" fontSize={fontSizeAxis} fontWeight="600" fill="var(--chart-conv)">
           المحادثات
         </text>
 
@@ -352,11 +470,11 @@ function Chart({ points, loading }: { points: ChartPoint[]; loading: boolean }) 
             <g key={lvl}>
               <line x1={marginL} y1={y} x2={500 - marginR} y2={y} className="chart-grid-line" />
               {/* Left Y label */}
-              <text x={marginL - 8} y={y + 3} textAnchor="end" fontSize="7.5" fill="var(--muted)">
+              <text x={marginL - 8} y={y + 3} textAnchor="end" fontSize={fontSizeLabel} fill="var(--muted)">
                 {new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(spendVal)}
               </text>
               {/* Right Y label */}
-              <text x={500 - marginR + 8} y={y + 3} textAnchor="start" fontSize="7.5" fill="var(--muted)">
+              <text x={500 - marginR + 8} y={y + 3} textAnchor="start" fontSize={fontSizeLabel} fill="var(--muted)">
                 {Math.round(convVal).toLocaleString("en-US")}
               </text>
             </g>
@@ -395,9 +513,9 @@ function Chart({ points, loading }: { points: ChartPoint[]; loading: boolean }) 
           <text
             key={idx}
             x={getX(idx)}
-            y={marginT + plotH + 14}
+            y={marginT + plotH + (isMobile ? 18 : 14)}
             textAnchor="middle"
-            fontSize="8"
+            fontSize={fontSizeLabel}
             fill="var(--muted)"
             className="ltr-val"
           >
@@ -614,9 +732,9 @@ export function DashboardClient({ initial }: { initial: Data }) {
             </p>
           )}
         </div>
-        <button disabled={syncing} className="sync-button" onClick={sync}>
+        <button disabled={syncing} className="sync-button" onClick={sync} title={syncing ? "جارٍ مزامنة البيانات..." : "تحديث البيانات"}>
           <RefreshCw size={16} />
-          {syncing ? "جارٍ مزامنة البيانات..." : "تحديث البيانات"}
+          <span className="hide-mobile">{syncing ? "جارٍ مزامنة البيانات..." : "تحديث البيانات"}</span>
         </button>
       </header>
 
@@ -724,95 +842,157 @@ export function Table({ accounts }: { accounts: AccountRow[] }) {
     }
   };
 
+  const getAccountConnectionBadge = (status: string | null | undefined, hasRealId: boolean) => {
+    const isPending = status === "pending";
+    const isConnected = status === "connected";
+    
+    let badgeClass = "badge--failed";
+    let badgeText = "فشل الاتصال";
+
+    if (isConnected) {
+      badgeClass = "badge--connected";
+      badgeText = "متصل";
+    } else if (isPending) {
+      badgeClass = "badge--pending";
+      badgeText = hasRealId ? "متصل — لم تتم مزامنته" : "بانتظار الربط";
+    } else if (status === "expired" || status === "error") {
+      badgeClass = "badge--failed";
+      badgeText = "فشل الاتصال";
+    }
+    return <span className={`badge ${badgeClass}`}>{badgeText}</span>;
+  };
+
   return (
-    <div className="data-table">
-      {!accounts.length ? (
-        <div className="empty-state">لا توجد حسابات.</div>
-      ) : (
-        <table>
-          <thead>
-            <tr>
-              <th>اسم الحساب</th>
-              <th>الحالة</th>
-              <th>الإنفاق</th>
-              <th>المحادثات</th>
-              <th>تكلفة المحادثة</th>
-              <th>آخر مزامنة</th>
-            </tr>
-          </thead>
-          <tbody>
-            {accounts.map((a) => {
-              const isPending = a.connection_status === "pending";
-              const isConnected = a.connection_status === "connected";
-              const hasRealId = isRealMetaId(a.meta_account_id);
-
-              let badgeClass = "badge--failed";
-              let badgeText = "فشل الاتصال";
-
-              if (isConnected) {
-                badgeClass = "badge--connected";
-                badgeText = "متصل";
-              } else if (isPending) {
-                badgeClass = "badge--pending";
-                if (hasRealId) {
-                  badgeText = "متصل — لم تتم مزامنته";
-                } else {
-                  badgeText = "بانتظار الربط";
-                }
-              } else if (a.connection_status === "expired" || a.connection_status === "error") {
-                badgeClass = "badge--failed";
-                badgeText = "فشل الاتصال";
-              }
-
-              return (
-                <tr key={a.id}>
-                  <td className="account-name-cell">
-                    <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                      <span style={{ fontWeight: 600 }}>{a.name}</span>
-                      {hasRealId ? (
-                        <span className="ltr-val" style={{ fontSize: "10px", color: "var(--muted)", alignSelf: "flex-start" }}>
-                          {a.meta_account_id}
-                        </span>
-                      ) : (
-                        <span style={{ fontSize: "10px", color: "var(--muted)", alignSelf: "flex-start" }}>
-                          لم يتم ربط الحساب بعد
-                        </span>
-                      )}
-                    </div>
-                  </td>
-                  <td>
-                    <span className={`badge ${badgeClass}`}>{badgeText}</span>
-                  </td>
-                  <td>
-                    {isPending ? (
-                      "—"
-                    ) : (
-                      <strong className="ltr-val">{money(a.spend)}</strong>
-                    )}
-                  </td>
-                  <td>
-                    {isPending ? (
-                      "—"
-                    ) : (
-                      <span className="ltr-val">{formatNumber(a.conversations)}</span>
-                    )}
-                  </td>
-                  <td>
-                    {isPending || !a.conversations ? (
-                      "—"
-                    ) : (
-                      <strong className="ltr-val">{money(a.spend / a.conversations)}</strong>
-                    )}
-                  </td>
-                  <td>
-                    <span className="ltr-val">{formatLastSynced(a.last_synced_at, a.timezone_name)}</span>
-                  </td>
+    <>
+      {/* Desktop & Tablet Table */}
+      <div className="data-table-wrapper">
+        <div className="data-table">
+          {!accounts.length ? (
+            <div className="empty-state">لا توجد حسابات.</div>
+          ) : (
+            <table>
+              <thead>
+                <tr>
+                  <th>اسم الحساب</th>
+                  <th>الحالة</th>
+                  <th>الإنفاق</th>
+                  <th>المحادثات</th>
+                  <th>تكلفة المحادثة</th>
+                  <th>آخر مزامنة</th>
                 </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      )}
-    </div>
+              </thead>
+              <tbody>
+                {accounts.map((a) => {
+                  const isPending = a.connection_status === "pending";
+                  const hasRealId = isRealMetaId(a.meta_account_id);
+
+                  return (
+                    <tr key={a.id}>
+                      <td className="account-name-cell">
+                        <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                          <span style={{ fontWeight: 600, whiteSpace: "normal", wordBreak: "break-word" }}>{a.name}</span>
+                          {hasRealId ? (
+                            <span className="ltr-val" style={{ fontSize: "10px", color: "var(--muted)", alignSelf: "flex-start" }}>
+                              {a.meta_account_id}
+                            </span>
+                          ) : (
+                            <span style={{ fontSize: "10px", color: "var(--muted)", alignSelf: "flex-start" }}>
+                              لم يتم ربط الحساب بعد
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td>
+                        {getAccountConnectionBadge(a.connection_status, hasRealId)}
+                      </td>
+                      <td>
+                        {isPending ? (
+                          "—"
+                        ) : (
+                          <strong className="ltr-val">{money(a.spend)}</strong>
+                        )}
+                      </td>
+                      <td>
+                        {isPending ? (
+                          "—"
+                        ) : (
+                          <span className="ltr-val">{formatNumber(a.conversations)}</span>
+                        )}
+                      </td>
+                      <td>
+                        {isPending || !a.conversations ? (
+                          "—"
+                        ) : (
+                          <strong className="ltr-val">{money(a.spend / a.conversations)}</strong>
+                        )}
+                      </td>
+                      <td>
+                        <span className="ltr-val">{formatLastSynced(a.last_synced_at, a.timezone_name)}</span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+
+      {/* Mobile Card Layout */}
+      <div className="mobile-cards-list">
+        {!accounts.length ? (
+          <div className="empty-state">لا توجد حسابات.</div>
+        ) : (
+          accounts.map((a) => {
+            const isPending = a.connection_status === "pending";
+            const hasRealId = isRealMetaId(a.meta_account_id);
+
+            return (
+              <article key={a.id} className="mobile-card">
+                <div className="mobile-card-row">
+                  <div style={{ display: "flex", flexDirection: "column", gap: "2px", minWidth: 0, flex: 1 }}>
+                    <span className="mobile-card-title" style={{ wordBreak: "break-word", whiteSpace: "normal" }}>{a.name}</span>
+                    {hasRealId ? (
+                      <span className="ltr-val" style={{ fontSize: "10px", color: "var(--muted)", alignSelf: "flex-start" }}>
+                        {a.meta_account_id}
+                      </span>
+                    ) : (
+                      <span style={{ fontSize: "10px", color: "var(--muted)", alignSelf: "flex-start" }}>
+                        لم يتم ربط الحساب بعد
+                      </span>
+                    )}
+                  </div>
+                  {getAccountConnectionBadge(a.connection_status, hasRealId)}
+                </div>
+
+                <div className="mobile-card-divider" />
+
+                <div className="mobile-card-row">
+                  <span className="mobile-card-label">الإنفاق</span>
+                  <strong className="mobile-card-val ltr-val">{isPending ? "—" : money(a.spend)}</strong>
+                </div>
+
+                <div className="mobile-card-row">
+                  <span className="mobile-card-label">المحادثات</span>
+                  <span className="mobile-card-val ltr-val">{isPending ? "—" : formatNumber(a.conversations)}</span>
+                </div>
+
+                <div className="mobile-card-row">
+                  <span className="mobile-card-label">تكلفة المحادثة</span>
+                  <strong className="mobile-card-val ltr-val">
+                    {isPending || !a.conversations ? "—" : money(a.spend / a.conversations)}
+                  </strong>
+                </div>
+
+                <div className="mobile-card-row">
+                  <span className="mobile-card-label">آخر مزامنة</span>
+                  <span className="mobile-card-val ltr-val">{formatLastSynced(a.last_synced_at, a.timezone_name)}</span>
+                </div>
+              </article>
+            );
+          })
+        )}
+      </div>
+    </>
   );
 }
