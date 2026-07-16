@@ -120,7 +120,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
         id="sidebar-menu"
         ref={sidebarRef}
         tabIndex={-1}
-        className={`sidebar ${isOpen ? "sidebar--open" : ""}`}
+        className={`sidebar ${isOpen ? "sidebar-open" : ""}`}
         style={{ outline: "none" }}
       >
         <div className="brand" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%" }}>
