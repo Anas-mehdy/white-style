@@ -892,13 +892,9 @@ export function Table({ accounts }: { accounts: AccountRow[] }) {
                       <td className="account-name-cell">
                         <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
                           <span style={{ fontWeight: 600, whiteSpace: "normal", wordBreak: "break-word" }}>{a.name}</span>
-                          {hasRealId ? (
+                          {hasRealId && (
                             <span className="ltr-val" style={{ fontSize: "10px", color: "var(--muted)", alignSelf: "flex-start" }}>
                               {a.meta_account_id}
-                            </span>
-                          ) : (
-                            <span style={{ fontSize: "10px", color: "var(--muted)", alignSelf: "flex-start" }}>
-                              لم يتم ربط الحساب بعد
                             </span>
                           )}
                         </div>
@@ -953,13 +949,9 @@ export function Table({ accounts }: { accounts: AccountRow[] }) {
                 <div className="mobile-card-row">
                   <div style={{ display: "flex", flexDirection: "column", gap: "2px", minWidth: 0, flex: 1 }}>
                     <span className="mobile-card-title" style={{ wordBreak: "break-word", whiteSpace: "normal" }}>{a.name}</span>
-                    {hasRealId ? (
+                    {hasRealId && (
                       <span className="ltr-val" style={{ fontSize: "10px", color: "var(--muted)", alignSelf: "flex-start" }}>
                         {a.meta_account_id}
-                      </span>
-                    ) : (
-                      <span style={{ fontSize: "10px", color: "var(--muted)", alignSelf: "flex-start" }}>
-                        لم يتم ربط الحساب بعد
                       </span>
                     )}
                   </div>
