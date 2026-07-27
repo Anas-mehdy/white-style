@@ -29,11 +29,42 @@ type CacheEntry = {
 
 const memoryCache = new Map<string, CacheEntry>();
 
+export class InvalidAccountError extends Error {
+  constructor(message = "معرّف الحساب الإعلاني غير صالح") {
+    super(message);
+    this.name = "InvalidAccountError";
+  }
+}
+
+export class AccountNotFoundError extends Error {
+  constructor(message = "الحساب الإعلاني غير موجود أو لا ينتمي لهذه المؤسسة") {
+    super(message);
+    this.name = "AccountNotFoundError";
+  }
+}
+
 const DEFAULT_ORGANIZATION_ID = "11111111-1111-4111-8111-111111111111";
 
+function isValidUUID(uuid: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(uuid);
+}
+
+export function validateAdAccountForOrganization(
+  adAccountId: string | null | undefined,
+  allAccounts: { id: string }[]
+): void {
+  if (!adAccountId) return;
+  if (!isValidUUID(adAccountId)) {
+    throw new InvalidAccountError();
+  }
+  const exists = allAccounts.some((a) => a.id === adAccountId);
+  if (!exists) {
+    throw new AccountNotFoundError();
+  }
+}
+
 const getCacheKey = (days: number, since: string, until: string, accountIds: string[], selectedAdAccountId?: string | null) => {
-  const sortedIds = [...accountIds].sort().join(",");
-  return `${days}:${since}:${until}:${sortedIds}:selected-${selectedAdAccountId || "all"}`;
+  return ["dashboard", DEFAULT_ORGANIZATION_ID, days, since, until, selectedAdAccountId ?? "all"].join(":");
 };
 
 const getSystemDateRange = (daysCount: number) => {
@@ -123,9 +154,7 @@ export async function getDashboardData(
   if (error) throw new Error(error.message);
 
   const allAccounts = accountsResult.data ?? [];
-  if (adAccountId && !allAccounts.some((a) => a.id === adAccountId)) {
-    throw new Error(`Ad account ${adAccountId} not found for this organization`);
-  }
+  validateAdAccountForOrganization(adAccountId, allAccounts);
 
   const targetAccounts = adAccountId ? allAccounts.filter((a) => a.id === adAccountId) : allAccounts;
   const targetIds = targetAccounts.map((a) => a.id);
@@ -160,9 +189,7 @@ export async function getDashboardData(
         .from("ad_insights_daily")
         .select("ad_account_id,insight_date,spend,messaging_conversations")
         .eq("organization_id", DEFAULT_ORGANIZATION_ID)
-        .is("campaign_id", null)
-        .is("ad_set_id", null)
-        .is("ad_id", null)
+        .not("ad_id", "is", null)
         .gte("insight_date", since)
         .lte("insight_date", until);
 
