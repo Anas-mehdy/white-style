@@ -91,6 +91,7 @@ export interface DashboardApiResponse {
     impressions?: number;
     hasRealData?: boolean;
   }[];
+  selectedAdAccountId?: string | null;
   dataSource: "database";
   isFallback: boolean;
   isPartial: boolean;

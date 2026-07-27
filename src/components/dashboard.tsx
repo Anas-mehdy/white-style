@@ -581,8 +581,26 @@ function formatBackendDateRange(since: string | undefined, until: string | undef
   }
 }
 
-export function DashboardClient({ initial }: { initial: Data }) {
-  const [days, setDays] = useState(30);
+const formatAccountOptionLabel = (acc: AccountRow) => {
+  const rawId = acc.meta_account_id ? acc.meta_account_id.replace(/^act_/, "") : "";
+  const last4 = rawId.length >= 4 ? rawId.slice(-4) : rawId;
+  const suffix = last4 ? ` — •••• ${last4}` : "";
+  return `${acc.name}${suffix}`;
+};
+
+export function DashboardClient({
+  initial,
+  initialDays = 30,
+  initialAdAccountId = null,
+}: {
+  initial: Data;
+  initialDays?: number;
+  initialAdAccountId?: string | null;
+}) {
+  const [days, setDays] = useState(initialDays);
+  const [selectedAdAccountId, setSelectedAdAccountId] = useState<string | null>(
+    initialAdAccountId || initial.selectedAdAccountId || null
+  );
   const [data, setData] = useState(initial);
   const [syncing, setSyncing] = useState(false);
   const [loadingDays, setLoadingDays] = useState(false);
@@ -598,7 +616,21 @@ export function DashboardClient({ initial }: { initial: Data }) {
     };
   }, []);
 
-  async function load(d = days, refresh = false): Promise<DashboardApiResponse> {
+  function updateUrlParams(d: number, accId: string | null) {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    params.set("days", d.toString());
+    if (accId) {
+      params.set("adAccountId", accId);
+    } else {
+      params.delete("adAccountId");
+    }
+    const queryString = params.toString();
+    const newPath = `${window.location.pathname}${queryString ? `?${queryString}` : ""}`;
+    window.history.replaceState(null, "", newPath);
+  }
+
+  async function load(d = days, refresh = false, accId = selectedAdAccountId): Promise<DashboardApiResponse> {
     if (daysController.current) {
       daysController.current.abort();
     }
@@ -606,7 +638,14 @@ export function DashboardClient({ initial }: { initial: Data }) {
     daysController.current = c;
     setLoadingDays(true);
     try {
-      const r = await fetch(`/api/dashboard?days=${d}${refresh ? "&refresh=true" : ""}`, {
+      let url = `/api/dashboard?days=${d}`;
+      if (accId) {
+        url += `&adAccountId=${encodeURIComponent(accId)}`;
+      }
+      if (refresh) {
+        url += `&refresh=true`;
+      }
+      const r = await fetch(url, {
         cache: "no-store",
         signal: c.signal,
       });
@@ -722,6 +761,20 @@ export function DashboardClient({ initial }: { initial: Data }) {
   // Calculate CPR from total sums
   const totalCost = s.conversations ? s.spend / s.conversations : null;
 
+  const selectedAccountObj = selectedAdAccountId
+    ? data.accounts.find((a) => a.id === selectedAdAccountId)
+    : null;
+
+  const connectedCount = selectedAdAccountId
+    ? selectedAccountObj?.connection_status === "connected"
+      ? 1
+      : 0
+    : s.connected;
+
+  const displayedAccounts = selectedAdAccountId
+    ? data.accounts.filter((a) => a.id === selectedAdAccountId)
+    : data.accounts;
+
   return (
     <>
       <header className="topbar">
@@ -733,7 +786,7 @@ export function DashboardClient({ initial }: { initial: Data }) {
             </p>
           )}
         </div>
-        <button disabled={syncing} className="sync-button" onClick={sync} title={syncing ? "جارٍ مزامنة البيانات..." : "تحديث البيانات"}>
+        <button disabled={syncing} className="sync-button" onClick={() => sync()} title={syncing ? "جارٍ مزامنة البيانات..." : "تحديث البيانات"}>
           <RefreshCw size={16} />
           <span className="hide-mobile">{syncing ? "جارٍ مزامنة البيانات..." : "تحديث البيانات"}</span>
         </button>
@@ -765,7 +818,7 @@ export function DashboardClient({ initial }: { initial: Data }) {
           ["الإنفاق", money(s.spend)],
           ["المحادثات", formatNumber(s.conversations)],
           ["تكلفة المحادثة", totalCost === null ? "—" : money(totalCost)],
-          ["الحسابات المتصلة", formatNumber(s.connected)],
+          ["الحسابات المتصلة", formatNumber(connectedCount)],
         ].map(([l, v]) => (
           <article className="metric-card" key={l}>
             <div className="metric-label">{l}</div>
@@ -775,21 +828,60 @@ export function DashboardClient({ initial }: { initial: Data }) {
       </section>
 
       <article className="panel">
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", flexWrap: "wrap", gap: "10px" }}>
-          <div className="period-switch">
-            {[7, 14, 30].map((d) => (
-              <button
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", flexWrap: "wrap", gap: "12px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+              <label htmlFor="account-filter-select" style={{ fontSize: "12.5px", color: "var(--muted)", fontWeight: "500", whiteSpace: "nowrap" }}>
+                الحساب الإعلاني:
+              </label>
+              <select
+                id="account-filter-select"
+                value={selectedAdAccountId || ""}
                 disabled={syncing || loadingDays}
-                key={d}
-                className={d === days ? "active" : ""}
-                onClick={async () => {
-                  setDays(d);
-                  await load(d);
+                onChange={async (e) => {
+                  const val = e.target.value || null;
+                  setSelectedAdAccountId(val);
+                  updateUrlParams(days, val);
+                  await load(days, false, val);
+                }}
+                className="account-select-dropdown"
+                style={{
+                  padding: "7px 12px",
+                  borderRadius: "8px",
+                  fontSize: "13px",
+                  border: "1px solid var(--border)",
+                  background: "var(--background)",
+                  color: "var(--foreground)",
+                  cursor: "pointer",
+                  outline: "none",
+                  fontWeight: 500
                 }}
               >
-                {d} يومًا
-              </button>
-            ))}
+                <option value="">جميع الحسابات</option>
+                {data.accounts.map((acc) => (
+                  <option key={acc.id} value={acc.id}>
+                    {formatAccountOptionLabel(acc)}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="period-switch">
+              {[7, 14, 30].map((d) => (
+                <button
+                  disabled={syncing || loadingDays}
+                  key={d}
+                  className={d === days ? "active" : ""}
+                  onClick={async () => {
+                    setDays(d);
+                    updateUrlParams(d, selectedAdAccountId);
+                    await load(d, false, selectedAdAccountId);
+                  }}
+                >
+                  {d} يومًا
+                </button>
+              ))}
+            </div>
           </div>
           {data.range && (
             <span style={{ fontSize: "12px", color: "var(--muted)", fontWeight: "500" }} className="ltr-val">
@@ -801,8 +893,10 @@ export function DashboardClient({ initial }: { initial: Data }) {
       </article>
 
       <article className="panel">
-        <h2 style={{ marginBottom: "14px", fontSize: "14px", fontWeight: "600" }}>الحسابات الإعلانية النشطة</h2>
-        <Table accounts={data.accounts.slice(0, 5)} />
+        <h2 style={{ marginBottom: "14px", fontSize: "14px", fontWeight: "600" }}>
+          {selectedAdAccountId ? "بيانات الحساب المختار" : "الحسابات الإعلانية النشطة"}
+        </h2>
+        <Table accounts={displayedAccounts.slice(0, 5)} />
         <Link className="text-button" href="/accounts" style={{ marginTop: "10px", display: "inline-block" }}>
           عرض تفاصيل الحسابات
         </Link>

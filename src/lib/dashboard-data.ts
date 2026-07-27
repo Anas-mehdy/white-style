@@ -29,9 +29,11 @@ type CacheEntry = {
 
 const memoryCache = new Map<string, CacheEntry>();
 
-const getCacheKey = (days: number, since: string, until: string, accountIds: string[]) => {
+const DEFAULT_ORGANIZATION_ID = "11111111-1111-4111-8111-111111111111";
+
+const getCacheKey = (days: number, since: string, until: string, accountIds: string[], selectedAdAccountId?: string | null) => {
   const sortedIds = [...accountIds].sort().join(",");
-  return `${days}:${since}:${until}:${sortedIds}`;
+  return `${days}:${since}:${until}:${sortedIds}:selected-${selectedAdAccountId || "all"}`;
 };
 
 const getSystemDateRange = (daysCount: number) => {
@@ -75,15 +77,44 @@ interface DbInsightRow {
   messaging_conversations: number | null;
 }
 
-export async function getDashboardData(days = 30, bypassCache = false): Promise<DashboardApiResponse> {
+export async function getDashboardData(
+  days = 30,
+  bypassCache = false,
+  adAccountId?: string | null
+): Promise<DashboardApiResponse> {
   const supabase = await createClient();
   const { since, until } = getSystemDateRange(days);
 
+  // Build agent decisions query
+  let decisionsQuery = supabase
+    .from("agent_decisions_final_status")
+    .select("id")
+    .eq("organization_id", DEFAULT_ORGANIZATION_ID)
+    .gte("created_at", since);
+  if (adAccountId) {
+    decisionsQuery = decisionsQuery.eq("ad_account_id", adAccountId);
+  }
+
+  // Build sync runs query
+  let runsQuery = supabase
+    .from("sync_runs")
+    .select("status,started_at,finished_at,error_summary,cursor_state,ad_account_id")
+    .eq("organization_id", DEFAULT_ORGANIZATION_ID)
+    .eq("source", "meta_api")
+    .order("started_at", { ascending: false });
+  if (adAccountId) {
+    runsQuery = runsQuery.eq("ad_account_id", adAccountId);
+  }
+
   // Fetch accounts, decisions, sync runs, notifications, config in parallel from Supabase
   const [accountsResult, decisionsResult, runsResult, notificationsResult, configResult] = await Promise.all([
-    supabase.from("meta_ad_accounts").select("id,name,meta_account_id,currency,timezone_name,connection_status,last_synced_at").order("name"),
-    supabase.from("agent_decisions_final_status").select("id").gte("created_at", since),
-    supabase.from("sync_runs").select("status,started_at,finished_at,error_summary,cursor_state").eq("source", "meta_api").order("started_at", { ascending: false }),
+    supabase
+      .from("meta_ad_accounts")
+      .select("id,name,meta_account_id,currency,timezone_name,connection_status,last_synced_at")
+      .eq("organization_id", DEFAULT_ORGANIZATION_ID)
+      .order("created_at", { ascending: true }),
+    decisionsQuery,
+    runsQuery,
     supabase.from("notifications").select("id", { count: "exact", head: true }).is("read_at", null),
     supabase.from("agent_configs").select("mode,kill_switch").order("updated_at", { ascending: false }).limit(1),
   ]);
@@ -92,11 +123,17 @@ export async function getDashboardData(days = 30, bypassCache = false): Promise<
   if (error) throw new Error(error.message);
 
   const allAccounts = accountsResult.data ?? [];
-  const connectedAccounts = allAccounts.filter((a) => a.connection_status === "connected");
+  if (adAccountId && !allAccounts.some((a) => a.id === adAccountId)) {
+    throw new Error(`Ad account ${adAccountId} not found for this organization`);
+  }
+
+  const targetAccounts = adAccountId ? allAccounts.filter((a) => a.id === adAccountId) : allAccounts;
+  const targetIds = targetAccounts.map((a) => a.id);
+  const connectedAccounts = targetAccounts.filter((a) => a.connection_status === "connected");
   const connectedIds = connectedAccounts.map((a) => a.id);
 
   // Check Memory Cache unless bypassed
-  const cacheKey = getCacheKey(days, since, until, connectedIds);
+  const cacheKey = getCacheKey(days, since, until, targetIds, adAccountId);
   if (!bypassCache) {
     const cached = memoryCache.get(cacheKey);
     if (cached && Date.now() - cached.timestamp < 30000) {
@@ -106,11 +143,11 @@ export async function getDashboardData(days = 30, bypassCache = false): Promise<
   }
 
   // Fetch daily insights using paginated range queries to prevent row truncation
-  console.info(`[dashboard-data] Querying database insights for range: ${since} to ${until} for connected accounts only.`);
+  console.info(`[dashboard-data] Querying database insights for range: ${since} to ${until} for target accounts.`);
   
   const dbRows: DbInsightRow[] = [];
   
-  if (connectedIds.length > 0) {
+  if (targetIds.length > 0) {
     let dbPage = 0;
     const dbPageSize = 1000;
     let hasMoreDb = true;
@@ -118,13 +155,27 @@ export async function getDashboardData(days = 30, bypassCache = false): Promise<
     while (hasMoreDb) {
       const rangeStart = dbPage * dbPageSize;
       const rangeEnd = rangeStart + dbPageSize - 1;
-      const { data: pageData, error: dbError } = (await supabase
+
+      let query = supabase
         .from("ad_insights_daily")
         .select("ad_account_id,insight_date,spend,messaging_conversations")
-        .in("ad_account_id", connectedIds)
+        .eq("organization_id", DEFAULT_ORGANIZATION_ID)
+        .is("campaign_id", null)
+        .is("ad_set_id", null)
+        .is("ad_id", null)
         .gte("insight_date", since)
-        .lte("insight_date", until)
-        .range(rangeStart, rangeEnd)) as { data: DbInsightRow[] | null; error: { message: string } | null };
+        .lte("insight_date", until);
+
+      if (adAccountId) {
+        query = query.eq("ad_account_id", adAccountId);
+      } else {
+        query = query.in("ad_account_id", targetIds);
+      }
+
+      const { data: pageData, error: dbError } = (await query.range(rangeStart, rangeEnd)) as {
+        data: DbInsightRow[] | null;
+        error: { message: string } | null;
+      };
 
       if (dbError) {
         throw new Error(`Database query error: ${dbError.message}`);
@@ -315,6 +366,7 @@ export async function getDashboardData(days = 30, bypassCache = false): Promise<
     },
     range: { since, until, days },
     daily,
+    selectedAdAccountId: adAccountId || null,
     dataSource: "database" as const,
     isFallback: false,
     isPartial: false,
