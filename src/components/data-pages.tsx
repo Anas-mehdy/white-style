@@ -35,6 +35,9 @@ import {
   translateMetaError,
   extractBudgetValue
 } from "@/lib/readable-helpers";
+import { AdExceptionBadge } from "@/components/ad-exceptions/AdExceptionBadge";
+import { AdExceptionDialog } from "@/components/ad-exceptions/AdExceptionDialog";
+import type { AdPauseException } from "@/types/ad-exceptions";
 
 type RecordRow = Record<string, unknown>;
 
@@ -262,6 +265,38 @@ export function DecisionsPage({ rows }: { rows: RecordRow[] }) {
 
   // Minimal Custom Toast Notifications State
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // Ad Exception Dialog integration state
+  const [adExceptionsList, setAdExceptionsList] = useState<AdPauseException[]>([]);
+  const [excDialogOpen, setExcDialogOpen] = useState<boolean>(false);
+  const [excDialogInitial, setExcDialogInitial] = useState<AdPauseException | null>(null);
+  const [excPreAccId, setExcPreAccId] = useState<string>("");
+  const [excPreAdId, setExcPreAdId] = useState<string>("");
+
+  const fetchExceptions = async () => {
+    try {
+      const res = await fetch("/api/ad-exceptions", { cache: "no-store" });
+      if (res.ok) {
+        const data = await res.json();
+        setAdExceptionsList(data);
+      }
+    } catch {
+      // silent
+    }
+  };
+
+  useEffect(() => {
+    fetchExceptions();
+  }, []);
+
+  const exceptionsMap = useMemo(() => {
+    const map = new Map<string, AdPauseException>();
+    for (const item of adExceptionsList) {
+      if (item.ad_id) map.set(item.ad_id, item);
+      if (item.meta_ad_id) map.set(item.meta_ad_id, item);
+    }
+    return map;
+  }, [adExceptionsList]);
 
   // Timezone-aware local today YYYY-MM-DD
   const localToday = useMemo(() => new Date().toLocaleDateString("en-CA"), []);
@@ -738,9 +773,18 @@ export function DecisionsPage({ rows }: { rows: RecordRow[] }) {
                           <span className={`badge ${decBadgeClass}`}>{translateDecision(r.decision)}</span>
                         </td>
                         <td>
-                          <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                          <div style={{ display: "flex", flexDirection: "column", gap: "3px" }}>
                             <span style={{ fontWeight: 600 }}>{target.name}</span>
-                            <span style={{ fontSize: "11.5px", color: "var(--muted)" }}>{target.label}</span>
+                            <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
+                              <span style={{ fontSize: "11.5px", color: "var(--muted)" }}>{target.label}</span>
+                              {target.label === "إعلان" && (() => {
+                                const exc = exceptionsMap.get(String(r.ad_id || "")) || exceptionsMap.get(String(r.meta_ad_id || ""));
+                                if (exc && exc.is_active) {
+                                  return <AdExceptionBadge mode={exc.exception_mode} customLimit={exc.custom_cost_per_conversation} />;
+                                }
+                                return null;
+                              })()}
+                            </div>
                           </div>
                         </td>
                         <td className="account-name-cell">{name(r)}</td>
@@ -1048,6 +1092,52 @@ export function DecisionsPage({ rows }: { rows: RecordRow[] }) {
                         )}
                       </div>
                     </div>
+
+                    {/* Requirement 18: Ad Exception Management for Ad Targets */}
+                    {(r.ad_id || (r.meta_ad_id && r.meta_ad_id !== "—")) && (
+                      <div className="info-item" style={{ gridColumn: "span 2", background: "var(--surface-soft)", border: "1px solid var(--border)", borderRadius: "8px", padding: "12px" }}>
+                        <div className="info-label" style={{ fontWeight: "600", color: "var(--foreground)", marginBottom: "6px", fontSize: "12.5px" }}>
+                          استثناء إيقاف الإعلان (Ad Pause Exception)
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", flexWrap: "wrap" }}>
+                          {(() => {
+                            const exc = exceptionsMap.get(String(r.ad_id || "")) || exceptionsMap.get(String(r.meta_ad_id || ""));
+                            if (exc) {
+                              return (
+                                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                                  <AdExceptionBadge mode={exc.exception_mode} customLimit={exc.custom_cost_per_conversation} />
+                                  <span style={{ fontSize: "12px", color: exc.is_active ? "var(--green)" : "var(--muted)" }}>
+                                    ({exc.is_active ? "فعال" : "معطل"})
+                                  </span>
+                                </div>
+                              );
+                            }
+                            return <span style={{ fontSize: "12px", color: "var(--muted)" }}>لا يوجد استثناء مخصص لهذا الإعلان</span>;
+                          })()}
+
+                          <button
+                            type="button"
+                            className="sync-button"
+                            style={{ padding: "6px 12px", fontSize: "12px", background: "var(--surface)", fontWeight: "600" }}
+                            onClick={() => {
+                              const exc = exceptionsMap.get(String(r.ad_id || "")) || exceptionsMap.get(String(r.meta_ad_id || ""));
+                              if (exc) {
+                                setExcDialogInitial(exc);
+                                setExcPreAccId("");
+                                setExcPreAdId("");
+                              } else {
+                                setExcDialogInitial(null);
+                                setExcPreAccId(String(r.ad_account_id || ""));
+                                setExcPreAdId(String(r.ad_id || ""));
+                              }
+                              setExcDialogOpen(true);
+                            }}
+                          >
+                            إدارة استثناء الإيقاف
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
                 
@@ -1360,6 +1450,21 @@ Raw Error Message: ${primaryAction?.error_message || r.latest_error_message || "
           );
         })()}
       </div>
+
+      {/* Ad Exception Dialog Integration */}
+      <AdExceptionDialog
+        isOpen={excDialogOpen}
+        onClose={() => setExcDialogOpen(false)}
+        onSuccess={(msg) => {
+          setToastMessage(msg);
+          fetchExceptions();
+          setTimeout(() => setToastMessage(null), 3000);
+        }}
+        accounts={accountsList}
+        initialData={excDialogInitial}
+        preselectedAdAccountId={excPreAccId}
+        preselectedAdId={excPreAdId}
+      />
     </>
   );
 }

@@ -12,6 +12,7 @@ const nav = [
   ["/create-campaign", "إنشاء الحملات", Rocket],
   ["/accounts", "الحسابات الإعلانية", Target],
   ["/agent-decisions", "قرارات Agent", BrainCircuit],
+  ["/dashboard/ad-exceptions", "استثناءات الإعلانات", ShieldCheck],
   ["/execution-log", "سجل التنفيذ", Activity],
   ["/safety-rules", "قواعد الحماية", ShieldCheck],
   ["/settings", "الإعدادات", Settings2],
