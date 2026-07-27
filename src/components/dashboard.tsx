@@ -616,6 +616,8 @@ export function DashboardClient({
     };
   }, []);
 
+  const router = useRouter();
+
   function updateUrlParams(d: number, accId: string | null) {
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
@@ -627,7 +629,7 @@ export function DashboardClient({
     }
     const queryString = params.toString();
     const newPath = `${window.location.pathname}${queryString ? `?${queryString}` : ""}`;
-    window.history.replaceState(null, "", newPath);
+    router.replace(newPath, { scroll: false });
   }
 
   async function load(d = days, refresh = false, accId = selectedAdAccountId): Promise<DashboardApiResponse> {

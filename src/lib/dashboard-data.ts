@@ -167,7 +167,15 @@ export async function getDashboardData(
     const cached = memoryCache.get(cacheKey);
     if (cached && Date.now() - cached.timestamp < 30000) {
       console.info("[dashboard-data] Returning cached dashboard data");
-      return cached.data as DashboardApiResponse;
+      const cachedPayload = cached.data as DashboardApiResponse;
+      return {
+        ...cachedPayload,
+        accounts: allAccounts.map((a) => ({
+          ...a,
+          spend: 0,
+          conversations: 0,
+        })),
+      };
     }
   }
 
@@ -407,16 +415,69 @@ export async function getDashboardData(
   return responsePayload;
 }
 
-export async function getPageData() {
+export async function getPageData(days = 30, adAccountId: string | null = null) {
   const supabase = await createClient();
-  const [accounts, decisions, actions, runs, configs] = await Promise.all([
-    getDashboardData(30),
-    supabase.from("agent_decisions_final_status").select("id,decision,reason,confidence,created_at,ad_account_id,proposed_change,input_snapshot,final_execution_status,final_status_at,latest_status,latest_error_code,latest_error_message,verified_action_at,failed_action_at,skipped_action_at,in_progress_action_at,ad_account_name,currency,meta_account_id,campaign_name,meta_campaign_id,ad_set_name,ad_set_daily_budget,meta_adset_id,ad_name,meta_ad_id").order("created_at", { ascending: false }),
-    supabase.from("agent_actions").select("id,status,action_type,meta_entity_type,meta_entity_id,executed_at,created_at,error_message,before_state,requested_state,verified_state,idempotency_key,error_code,agent_decisions(id,decision,reason,confidence,created_at,meta_campaigns(name),meta_ad_sets(name),meta_ads(name),meta_ad_accounts(name,currency))").order("created_at", { ascending: false }),
-    supabase.from("sync_runs").select("id,source,status,started_at,finished_at,records_processed,error_summary,cursor_state,meta_ad_accounts(name)").order("started_at", { ascending: false }),
-    supabase.from("agent_configs").select("id,mode,kill_switch,max_budget_change_percent,daily_total_increase_percent,cooldown_hours,stale_data_minutes,no_result_pause_multiple,poor_cost_multiple,scale_cost_multiple,minimum_results_to_scale,meta_ad_accounts(name)").order("updated_at", { ascending: false }),
+  const { since } = getSystemDateRange(days);
+
+  let decisionsQuery = supabase
+    .from("agent_decisions_final_status")
+    .select("id,decision,reason,confidence,created_at,ad_account_id,proposed_change,input_snapshot,final_execution_status,final_status_at,latest_status,latest_error_code,latest_error_message,verified_action_at,failed_action_at,skipped_action_at,in_progress_action_at,ad_account_name,currency,meta_account_id,campaign_name,meta_campaign_id,ad_set_name,ad_set_daily_budget,meta_adset_id,ad_name,meta_ad_id")
+    .eq("organization_id", DEFAULT_ORGANIZATION_ID)
+    .gte("created_at", since)
+    .order("created_at", { ascending: false });
+
+  if (adAccountId) {
+    decisionsQuery = decisionsQuery.eq("ad_account_id", adAccountId);
+  }
+
+  let runsQuery = supabase
+    .from("sync_runs")
+    .select("id,source,status,started_at,finished_at,records_processed,error_summary,cursor_state,meta_ad_accounts(name)")
+    .eq("organization_id", DEFAULT_ORGANIZATION_ID)
+    .order("started_at", { ascending: false });
+
+  if (adAccountId) {
+    runsQuery = runsQuery.eq("ad_account_id", adAccountId);
+  }
+
+  const [accounts, decisionsResult, runsResult, configsResult] = await Promise.all([
+    getDashboardData(days, false, adAccountId),
+    decisionsQuery,
+    runsQuery,
+    supabase
+      .from("agent_configs")
+      .select("id,mode,kill_switch,max_budget_change_percent,daily_total_increase_percent,cooldown_hours,stale_data_minutes,no_result_pause_multiple,poor_cost_multiple,scale_cost_multiple,minimum_results_to_scale,meta_ad_accounts(name)")
+      .order("updated_at", { ascending: false }),
   ]);
-  const error = [decisions, actions, runs, configs].find((r) => r.error)?.error;
+
+  const error = [decisionsResult, runsResult, configsResult].find((r) => r.error)?.error;
   if (error) throw new Error(error.message);
-  return { accounts: accounts.accounts, decisions: decisions.data ?? [], actions: actions.data ?? [], runs: runs.data ?? [], configs: configs.data ?? [] };
+
+  const decisionsList = decisionsResult.data ?? [];
+  const decisionIds = decisionsList.map((d) => d.id);
+
+  let actionsData: Record<string, unknown>[] = [];
+  if (!adAccountId || decisionIds.length > 0) {
+    let actionsQuery = supabase
+      .from("agent_actions")
+      .select("id,status,action_type,meta_entity_type,meta_entity_id,executed_at,created_at,error_message,before_state,requested_state,verified_state,idempotency_key,error_code,agent_decisions(id,decision,reason,confidence,created_at,meta_campaigns(name),meta_ad_sets(name),meta_ads(name),meta_ad_accounts(name,currency))")
+      .eq("organization_id", DEFAULT_ORGANIZATION_ID)
+      .gte("created_at", since)
+      .order("created_at", { ascending: false });
+
+    if (adAccountId) {
+      actionsQuery = actionsQuery.in("decision_id", decisionIds);
+    }
+    const { data: actionsList, error: actionsError } = await actionsQuery;
+    if (actionsError) throw new Error(actionsError.message);
+    actionsData = actionsList ?? [];
+  }
+
+  return {
+    accounts: accounts.accounts,
+    decisions: decisionsList,
+    actions: actionsData,
+    runs: runsResult.data ?? [],
+    configs: configsResult.data ?? []
+  };
 }
