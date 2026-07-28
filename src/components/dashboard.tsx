@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Activity, BrainCircuit, LayoutDashboard, RefreshCw, Settings2, ShieldCheck, Target, Sun, Moon, Rocket, Menu, X } from "lucide-react";
+import { Activity, BrainCircuit, LayoutDashboard, RefreshCw, Settings2, ShieldCheck, Target, Sun, Moon, Rocket, Menu, X, Sparkles } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { AccountRow, ChartPoint } from "@/lib/dashboard-data";
 import { isDashboardApiResponse, type DashboardApiResponse } from "@/types/dashboard";
@@ -10,6 +10,7 @@ import { isDashboardApiResponse, type DashboardApiResponse } from "@/types/dashb
 const nav = [
   ["/dashboard", "نظرة عامة", LayoutDashboard],
   ["/create-campaign", "إنشاء الحملات", Rocket],
+  ["/image-agent", "وكيل الصور", Sparkles],
   ["/accounts", "الحسابات الإعلانية", Target],
   ["/agent-decisions", "قرارات Agent", BrainCircuit],
   ["/dashboard/ad-exceptions", "استثناءات الإعلانات", ShieldCheck],
