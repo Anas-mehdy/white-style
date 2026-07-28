@@ -117,7 +117,7 @@ export async function POST(request: NextRequest) {
       .from("image_agent_batches")
       .insert({
         id: batchId,
-        created_by: "system",
+        created_by: "11111111-1111-4111-8111-111111111111",
         status: "queued",
         total_items: files.length,
         completed_items: 0,

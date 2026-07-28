@@ -66,7 +66,7 @@ export async function POST(
       .from("image_agent_batches")
       .insert({
         id: newBatchId,
-        created_by: "system",
+        created_by: "11111111-1111-4111-8111-111111111111",
         status: "queued",
         total_items: 1,
         completed_items: 0,
