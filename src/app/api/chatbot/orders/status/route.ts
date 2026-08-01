@@ -1,18 +1,20 @@
 import { NextResponse } from "next/server";
 import { setOrderStatusAction } from "@/lib/chatbot-actions";
-import { requireAdminAuth, AuthError } from "@/lib/supabase/server";
+import { requireOperatorAuth, AuthError } from "@/lib/supabase/server";
 
 export async function POST(request: Request) {
   try {
-    // Step 1 & 2: Verify Authentication & Authorization Guard
-    await requireAdminAuth();
+    // Step 1: Verify Authentication & Operator Authorization Guard
+    await requireOperatorAuth();
 
     const body = await request.json();
-    const { orderId, newStatus, idempotencyKey, actualShippingCost } = body;
+    const { orderId, newStatus, eventKey, idempotencyKey, actualShippingCost, payload } = body;
 
-    if (!orderId || !newStatus || !idempotencyKey) {
+    const finalEventKey = eventKey || idempotencyKey;
+
+    if (!orderId || !newStatus || !finalEventKey) {
       return NextResponse.json(
-        { success: false, message: "بيانات الإدخال غير مكتملة (orderId, newStatus, idempotencyKey مطلوبة)" },
+        { success: false, message: "بيانات الإدخال غير مكتملة (orderId, newStatus, eventKey مطلوبة)" },
         { status: 400 }
       );
     }
@@ -27,8 +29,9 @@ export async function POST(request: Request) {
     const result = await setOrderStatusAction(
       orderId,
       newStatus,
-      idempotencyKey,
-      actualShippingCost !== undefined ? Number(actualShippingCost) : undefined
+      finalEventKey,
+      actualShippingCost !== undefined && actualShippingCost !== null ? Number(actualShippingCost) : undefined,
+      payload
     );
 
     if (!result.success) {
@@ -40,7 +43,7 @@ export async function POST(request: Request) {
     if (error instanceof AuthError) {
       return NextResponse.json({ success: false, message: error.message }, { status: error.statusCode });
     }
-    const message = error instanceof Error ? error.message : "خطأ غير متوقع في خادم المعالجة";
-    return NextResponse.json({ success: false, message }, { status: 500 });
+    console.error("[/api/chatbot/orders/status] Server Error:", error);
+    return NextResponse.json({ success: false, message: "خطأ غير متوقع في خادم المعالجة" }, { status: 500 });
   }
 }

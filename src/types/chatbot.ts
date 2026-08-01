@@ -154,3 +154,17 @@ export interface HealthCardStatus {
   status: 'healthy' | 'warning' | 'error' | 'info';
   description: string;
 }
+
+export interface ChatbotConversationEvent {
+  id: string;
+  organization_id: string;
+  conversation_id: string;
+  event_type: string;
+  actor_type?: 'bot' | 'human' | 'system' | string | null;
+  actor_id?: string | null;
+  event_key?: string | null;
+  reason?: string | null;
+  summary?: string | null;
+  payload?: Record<string, unknown> | null;
+  created_at: string;
+}

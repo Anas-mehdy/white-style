@@ -110,7 +110,12 @@ export async function requireOrgAuth(requiredMinRole: "admin" | "operator" | "vi
     .eq("organization_id", DEFAULT_ORGANIZATION_ID)
     .maybeSingle();
 
-  if (memError || !membership) {
+  if (memError) {
+    console.error("[requireOrgAuth] Database membership query error:", memError);
+    throw new AuthError("خطأ في الاتصال بنظام المصادقة لقاعدة البيانات", 500);
+  }
+
+  if (!membership) {
     throw new AuthError("المستخدم غير مسجّل كعضو في هذه المؤسسة (403 Forbidden)", 403);
   }
 

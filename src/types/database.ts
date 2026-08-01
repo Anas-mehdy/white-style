@@ -829,6 +829,47 @@ export interface Database {
           updated_at?: string | null;
         };
       };
+      ws_chatbot_conversation_events: {
+        Row: {
+          id: string;
+          organization_id: string;
+          conversation_id: string;
+          event_type: string;
+          actor_type: 'bot' | 'human' | 'system' | string | null;
+          actor_id: string | null;
+          event_key: string | null;
+          reason: string | null;
+          summary: string | null;
+          payload: Json | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          organization_id: string;
+          conversation_id: string;
+          event_type: string;
+          actor_type?: string | null;
+          actor_id?: string | null;
+          event_key?: string | null;
+          reason?: string | null;
+          summary?: string | null;
+          payload?: Json | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          organization_id?: string;
+          conversation_id?: string;
+          event_type?: string;
+          actor_type?: string | null;
+          actor_id?: string | null;
+          event_key?: string | null;
+          reason?: string | null;
+          summary?: string | null;
+          payload?: Json | null;
+          created_at?: string;
+        };
+      };
     };
     Views: {
       ws_chatbot_order_profitability: {
@@ -849,9 +890,41 @@ export interface Database {
       ws_chatbot_set_order_status: {
         Args: {
           p_order_id: string;
-          p_status: string;
-          p_idempotency_key?: string;
-          p_actual_shipping_cost?: number;
+          p_new_status: string;
+          p_event_key: string;
+          p_actual_shipping_cost?: number | null;
+          p_payload?: Json;
+        };
+        Returns: Json;
+      };
+      ws_chatbot_takeover_conversation: {
+        Args: {
+          p_organization_id: string;
+          p_conversation_id: string;
+          p_actor_user_id: string;
+          p_event_key: string;
+          p_reason?: string | null;
+          p_summary?: string | null;
+        };
+        Returns: Json;
+      };
+      ws_chatbot_release_conversation: {
+        Args: {
+          p_organization_id: string;
+          p_conversation_id: string;
+          p_actor_user_id: string;
+          p_event_key: string;
+          p_summary?: string | null;
+        };
+        Returns: Json;
+      };
+      ws_chatbot_close_conversation: {
+        Args: {
+          p_organization_id: string;
+          p_conversation_id: string;
+          p_actor_user_id: string;
+          p_event_key: string;
+          p_reason?: string | null;
         };
         Returns: Json;
       };

@@ -1,23 +1,16 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect } from "react";
 import { ChatbotNav } from "./chatbot-nav";
-import { ChatbotConversation, ChatbotMessage } from "@/types/chatbot";
-import { ToastContainer, Toast, EmptyState } from "./ui";
+import { ChatbotConversation, ChatbotMessage, ChatbotConversationEvent } from "@/types/chatbot";
+import { ToastContainer, Toast } from "./ui";
 import {
-  MessageSquare,
-  Search,
   UserCheck,
   Bot,
-  Send,
   AlertTriangle,
   Clock,
-  Phone,
-  User,
-  ShoppingBag,
-  RefreshCw,
   XCircle,
-  CheckCircle2
+  Activity
 } from "lucide-react";
 
 export function ChatbotInboxClient({
@@ -33,9 +26,10 @@ export function ChatbotInboxClient({
     initialConversations.length > 0 ? initialConversations[0].id : null
   );
   const [messages, setMessages] = useState<ChatbotMessage[]>([]);
+  const [events, setEvents] = useState<ChatbotConversationEvent[]>([]);
   const [search, setSearch] = useState("");
   const [filterMode, setFilterMode] = useState<"all" | "bot" | "human">("all");
-  const [isPolling, setIsPolling] = useState(true);
+  const [isPolling] = useState(true);
 
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [actionBlockedMessage, setActionBlockedMessage] = useState<string | null>(null);
@@ -46,13 +40,21 @@ export function ChatbotInboxClient({
     setToasts((prev) => [...prev, { id, type, message }]);
   };
 
-  // Fetch messages for selected conversation
-  const fetchMessages = async (convId: string) => {
+  // Fetch messages and events for selected conversation
+  const fetchThreadData = async (convId: string) => {
     try {
-      const res = await fetch(`/api/chatbot/inbox/messages?conversationId=${convId}`);
-      if (res.ok) {
-        const data = await res.json();
-        setMessages(data.messages || []);
+      const [msgRes, evtRes] = await Promise.all([
+        fetch(`/api/chatbot/inbox/messages?conversationId=${convId}`),
+        fetch(`/api/chatbot/inbox/events?conversationId=${convId}`)
+      ]);
+
+      if (msgRes.ok) {
+        const msgData = await msgRes.json();
+        setMessages(msgData.messages || []);
+      }
+      if (evtRes.ok) {
+        const evtData = await evtRes.json();
+        setEvents(evtData.events || []);
       }
     } catch {
       // Quiet fail on background poll
@@ -61,18 +63,17 @@ export function ChatbotInboxClient({
 
   useEffect(() => {
     if (selectedConvId) {
-      fetchMessages(selectedConvId);
+      fetchThreadData(selectedConvId);
     }
   }, [selectedConvId]);
 
-  // Requirement #9: Polling every 5–10 seconds with visibility-aware pausing and unmount cleanup
+  // Polling every 7 seconds with visibility-aware pausing and cleanup
   useEffect(() => {
     if (!isPolling) return;
 
     const interval = setInterval(() => {
       if (document.hidden) return; // Pause polling when tab is hidden
 
-      // Poll conversations & current thread messages
       fetch("/api/chatbot/inbox/conversations")
         .then((res) => res.json())
         .then((data) => {
@@ -84,11 +85,11 @@ export function ChatbotInboxClient({
         .catch(() => {});
 
       if (selectedConvId) {
-        fetchMessages(selectedConvId);
+        fetchThreadData(selectedConvId);
       }
-    }, 7000); // 7-second polling interval
+    }, 7000);
 
-    return () => clearInterval(interval); // Clean up on unmount
+    return () => clearInterval(interval);
   }, [selectedConvId, isPolling]);
 
   // Handoff Actions ("استلام المحادثة", "إعادة للبوت", "إغلاق المحادثة")
@@ -98,20 +99,38 @@ export function ChatbotInboxClient({
     setIsMutating(true);
     setActionBlockedMessage(null);
 
+    const clientEventKey = `handoff-${action}-${selectedConvId}-${Date.now()}`;
+
     try {
       const res = await fetch("/api/chatbot/inbox/handoff", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action, conversationId: selectedConvId })
+        body: JSON.stringify({
+          action,
+          conversationId: selectedConvId,
+          eventKey: clientEventKey
+        })
       });
 
       const data = await res.json();
-      if (data.blockedReason) {
+
+      if (res.status === 403 || res.status === 401) {
+        addToast("error", data.message || "غير مصرح لك بنفيذ هذا الإجراء (403 Forbidden)");
+      } else if (data.blockedReason) {
         setActionBlockedMessage(data.blockedReason);
       } else if (data.success) {
         addToast("success", data.message || "تم تنفيذ الإجراء بنجاح");
-        // Refresh local state
-        window.location.reload();
+        
+        // Immediately refresh state from server without optimistic corruption
+        const convsRes = await fetch("/api/chatbot/inbox/conversations");
+        if (convsRes.ok) {
+          const convsData = await convsRes.json();
+          if (convsData.conversations) {
+            setConversations(convsData.conversations);
+            setHandoffs(convsData.handoffs || {});
+          }
+        }
+        await fetchThreadData(selectedConvId);
       } else {
         addToast("error", data.message || "تعذر تنفيذ الإجراء");
       }
@@ -135,7 +154,7 @@ export function ChatbotInboxClient({
       <ToastContainer toasts={toasts} onClose={(id) => setToasts((t) => t.filter((x) => x.id !== id))} />
       <ChatbotNav subtitle="صندوق محادثات الزبائن، متابعة الرد الآلي والاستلام البشري" />
 
-      {/* Warning banner if action is blocked by missing RPC */}
+      {/* Warning banner if action is blocked */}
       {actionBlockedMessage && (
         <div style={{ padding: "14px 18px", borderRadius: "12px", background: "rgba(245, 158, 11, 0.15)", border: "1px solid rgba(245, 158, 11, 0.4)", color: "#fbbf24", fontSize: "14px", fontWeight: 600, marginBottom: "16px", display: "flex", alignItems: "center", gap: "10px" }}>
           <AlertTriangle size={20} />
@@ -147,61 +166,56 @@ export function ChatbotInboxClient({
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "300px 1fr 280px",
+          gridTemplateColumns: "300px 1fr 300px",
           gap: "16px",
-          height: "calc(100vh - 220px)",
-          minHeight: "550px"
+          height: "calc(100vh - 180px)",
+          minHeight: "560px"
         }}
       >
         {/* Column 1: Conversations List */}
-        <div style={{ background: "rgba(15, 23, 42, 0.6)", borderRadius: "16px", border: "1px solid rgba(255, 255, 255, 0.1)", display: "flex", flexDirection: "column", overflow: "hidden" }}>
-          
-          {/* List Header & Filters */}
-          <div style={{ padding: "14px", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "8px", background: "rgba(0,0,0,0.3)", padding: "8px 12px", borderRadius: "8px", marginBottom: "10px" }}>
-              <Search size={16} style={{ color: "var(--muted)" }} />
-              <input
-                type="text"
-                placeholder="البحث بالمحادثة..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                style={{ background: "none", border: "none", color: "#fff", fontSize: "13px", outline: "none", width: "100%" }}
-              />
-            </div>
-
-            <div style={{ display: "flex", gap: "4px" }}>
-              {(["all", "bot", "human"] as const).map((m) => (
-                <button
-                  key={m}
-                  onClick={() => setFilterMode(m)}
-                  style={{
-                    flex: 1,
-                    padding: "4px 8px",
-                    borderRadius: "6px",
-                    fontSize: "12px",
-                    fontWeight: filterMode === m ? 700 : 500,
-                    background: filterMode === m ? "var(--accent-glow)" : "transparent",
-                    color: filterMode === m ? "#fff" : "var(--muted)",
-                    border: "none",
-                    cursor: "pointer"
-                  }}
-                >
-                  {m === "all" ? "الكل" : m === "bot" ? "البوت" : "بشري"}
-                </button>
-              ))}
-            </div>
+        <div style={{ background: "rgba(15, 23, 42, 0.6)", borderRadius: "16px", border: "1px solid rgba(255, 255, 255, 0.1)", padding: "14px", display: "flex", flexDirection: "column", gap: "12px", overflow: "hidden" }}>
+          <div style={{ display: "flex", gap: "8px" }}>
+            <input
+              type="text"
+              placeholder="بحث برقم المحادثة..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="input-field"
+              style={{ fontSize: "12px", padding: "8px 12px" }}
+            />
           </div>
 
-          {/* Conversation Items List */}
+          <div style={{ display: "flex", gap: "4px", borderBottom: "1px solid rgba(255,255,255,0.08)", paddingBottom: "8px" }}>
+            {(["all", "bot", "human"] as const).map((m) => (
+              <button
+                key={m}
+                onClick={() => setFilterMode(m)}
+                style={{
+                  flex: 1,
+                  padding: "4px 8px",
+                  borderRadius: "6px",
+                  fontSize: "11px",
+                  fontWeight: 600,
+                  border: "none",
+                  cursor: "pointer",
+                  background: filterMode === m ? "var(--accent-glow)" : "transparent",
+                  color: filterMode === m ? "#fff" : "var(--muted)"
+                }}
+              >
+                {m === "all" ? "الكل" : m === "bot" ? "البوت" : "بشري"}
+              </button>
+            ))}
+          </div>
+
           <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column" }}>
             {filteredConvs.length === 0 ? (
-              <div style={{ padding: "24px", textAlign: "center", color: "var(--muted)", fontSize: "13px" }}>
+              <div style={{ padding: "20px", textAlign: "center", color: "var(--muted)", fontSize: "13px" }}>
                 لا توجد محادثات مطابقة.
               </div>
             ) : (
               filteredConvs.map((conv) => {
                 const isSelected = conv.id === selectedConvId;
-                const isHuman = conv.mode === "human";
+                const isHuman = conv.mode === "human" || handoffs[conv.id] === "waiting_handoff";
 
                 return (
                   <div
@@ -327,7 +341,7 @@ export function ChatbotInboxClient({
                         )}
 
                         <div style={{ fontSize: "13px", lineHeight: 1.5, wordBreak: "break-word" }}>
-                          {msg.media_url && !msg.sender_type ? "[صورة / وسيط]" : "رسالة صادرة / واردة في المحادثة"}
+                          {msg.content || "[وسيط / ملحق]"}
                         </div>
 
                         <div style={{ fontSize: "10px", color: "var(--muted)", textAlign: "left", marginTop: "4px" }}>
@@ -346,25 +360,65 @@ export function ChatbotInboxClient({
           )}
         </div>
 
-        {/* Column 3: Customer & Context Panel */}
-        <div style={{ background: "rgba(15, 23, 42, 0.6)", borderRadius: "16px", border: "1px solid rgba(255, 255, 255, 0.1)", padding: "16px", display: "flex", flexDirection: "column", gap: "16px" }}>
+        {/* Column 3: Customer Panel & Event History */}
+        <div style={{ background: "rgba(15, 23, 42, 0.6)", borderRadius: "16px", border: "1px solid rgba(255, 255, 255, 0.1)", padding: "16px", display: "flex", flexDirection: "column", gap: "16px", overflowY: "auto" }}>
           <h4 style={{ fontSize: "14px", fontWeight: 700, color: "#fff", margin: 0, paddingBottom: "8px", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
-            سياق المحادثة والزبون
+            سياق المحادثة وتاريخ الأحداث
           </h4>
 
           {selectedConv ? (
-            <div style={{ fontSize: "13px", color: "var(--fg)", display: "flex", flexDirection: "column", gap: "12px" }}>
-              <div>
-                <span style={{ fontSize: "11px", color: "var(--muted)", display: "block" }}>معرّف المحادثة</span>
-                <span style={{ fontWeight: 600 }}>{selectedConv.id}</span>
+            <div style={{ fontSize: "13px", color: "var(--fg)", display: "flex", flexDirection: "column", gap: "16px" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                <div>
+                  <span style={{ fontSize: "11px", color: "var(--muted)", display: "block" }}>معرّف المحادثة</span>
+                  <span style={{ fontWeight: 600, fontSize: "12px" }}>{selectedConv.id}</span>
+                </div>
+                <div>
+                  <span style={{ fontSize: "11px", color: "var(--muted)", display: "block" }}>لغة التواصل</span>
+                  <span style={{ fontWeight: 600 }}>{selectedConv.language || "العربية"}</span>
+                </div>
+                <div>
+                  <span style={{ fontSize: "11px", color: "var(--muted)", display: "block" }}>تاريخ البدء</span>
+                  <span>{new Date(selectedConv.created_at).toLocaleString("ar-EG")}</span>
+                </div>
               </div>
-              <div>
-                <span style={{ fontSize: "11px", color: "var(--muted)", display: "block" }}>لغة التواصل</span>
-                <span style={{ fontWeight: 600 }}>{selectedConv.language || "العربية"}</span>
-              </div>
-              <div>
-                <span style={{ fontSize: "11px", color: "var(--muted)", display: "block" }}>تاريخ البدء</span>
-                <span>{new Date(selectedConv.created_at).toLocaleString("ar-EG")}</span>
+
+              {/* Conversation Event Timeline */}
+              <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: "12px" }}>
+                <h5 style={{ fontSize: "12px", fontWeight: 700, color: "#a5b4fc", margin: "0 0 10px 0", display: "flex", alignItems: "center", gap: "6px" }}>
+                  <Activity size={14} /> سجل الأحداث الذري (Events)
+                </h5>
+
+                {events.length === 0 ? (
+                  <div style={{ color: "var(--muted)", fontSize: "11px" }}>لا توجد أحداث مسجلة بعد.</div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                    {events.map((evt) => (
+                      <div
+                        key={evt.id}
+                        style={{
+                          padding: "8px 10px",
+                          borderRadius: "8px",
+                          background: "rgba(30, 41, 59, 0.6)",
+                          border: "1px solid rgba(255,255,255,0.05)",
+                          fontSize: "11px"
+                        }}
+                      >
+                        <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 700, color: "#818cf8" }}>
+                          <span>{evt.event_type}</span>
+                          <span style={{ color: "var(--muted)", fontWeight: 400 }}>
+                            {new Date(evt.created_at).toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit" })}
+                          </span>
+                        </div>
+                        {evt.summary && <div style={{ color: "#e2e8f0", marginTop: "2px" }}>{evt.summary}</div>}
+                        {evt.reason && <div style={{ color: "#fbbf24", marginTop: "2px" }}>السبب: {evt.reason}</div>}
+                        <div style={{ color: "var(--muted)", fontSize: "10px", marginTop: "4px" }}>
+                          المنفذ: {evt.actor_type || "نظام"}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           ) : (

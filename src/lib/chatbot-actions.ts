@@ -17,23 +17,27 @@ export interface ActionResult<T = unknown> {
 export async function setOrderStatusAction(
   orderId: string,
   newStatus: string,
-  idempotencyKey: string,
-  actualShippingCost?: number
+  eventKey: string,
+  actualShippingCost?: number,
+  payload?: Record<string, unknown>
 ): Promise<ActionResult> {
   try {
     const { adminClient } = await requireOperatorAuth();
+    const clientWithRpc = adminClient as unknown as {
+      rpc: (fn: string, args: Record<string, unknown>) => Promise<{ data: unknown; error: { code?: string; message: string } | null }>;
+    };
     
-    // Call existing PostgreSQL RPC via admin client
-    const { data, error } = await adminClient.rpc("ws_chatbot_set_order_status", {
+    const { data, error } = await clientWithRpc.rpc("ws_chatbot_set_order_status", {
       p_order_id: orderId,
-      p_status: newStatus,
-      p_idempotency_key: idempotencyKey,
-      p_actual_shipping_cost: actualShippingCost
+      p_new_status: newStatus,
+      p_event_key: eventKey,
+      p_actual_shipping_cost: actualShippingCost !== undefined ? actualShippingCost : null,
+      p_payload: payload ?? {}
     });
 
     if (error) {
       console.error("[setOrderStatusAction] RPC error:", error);
-      return { success: false, message: `تعذر تحديث حالة الطلب: ${error.message}` };
+      return { success: false, message: error.message };
     }
 
     return { success: true, message: "تم تحديث حالة الطلب بنجاح", data };
@@ -42,7 +46,7 @@ export async function setOrderStatusAction(
       return { success: false, message: err.message };
     }
     const errorMsg = err instanceof Error ? err.message : String(err);
-    return { success: false, message: `خطأ في خادم التنفيذ: ${errorMsg}` };
+    return { success: false, message: `خطأ في خادم المعالجة: ${errorMsg}` };
   }
 }
 
@@ -50,24 +54,29 @@ export async function setOrderStatusAction(
  * 2. Operational Actions: Atomic Handoff Actions
  * Allowed for: owner, admin, operator (via requireOperatorAuth)
  */
-export async function takeoverConversationAction(conversationId: string): Promise<ActionResult> {
+export async function takeoverConversationAction(
+  conversationId: string,
+  eventKey?: string,
+  reason?: string,
+  summary?: string
+): Promise<ActionResult> {
   try {
-    const { adminClient, organizationId } = await requireOperatorAuth();
+    const { adminClient, organizationId, user } = await requireOperatorAuth();
     const clientWithRpc = adminClient as unknown as {
       rpc: (fn: string, args: Record<string, unknown>) => Promise<{ data: unknown; error: { code?: string; message: string } | null }>;
     };
+
+    const finalEventKey = eventKey || `takeover-${conversationId}-${Date.now()}`;
     const { data, error } = await clientWithRpc.rpc("ws_chatbot_takeover_conversation", {
+      p_organization_id: organizationId,
       p_conversation_id: conversationId,
-      p_organization_id: organizationId
+      p_actor_user_id: user.id,
+      p_event_key: finalEventKey,
+      p_reason: reason || null,
+      p_summary: summary || null
     });
 
     if (error) {
-      if (error.code === "42883" || error.message.includes("function") || error.message.includes("does not exist")) {
-        return {
-          success: false,
-          blockedReason: "إجراء قيد الانتظار: الدالة الذرية ws_chatbot_takeover_conversation غير متوفرة في قاعدة البيانات حالياً."
-        };
-      }
       return { success: false, message: error.message };
     }
 
@@ -76,31 +85,32 @@ export async function takeoverConversationAction(conversationId: string): Promis
     if (err instanceof AuthError) {
       return { success: false, message: err.message };
     }
-    return {
-      success: false,
-      blockedReason: "إجراء قيد الانتظار: يتطلب هذا الإجراء تطبيق الهجرة الذرية لقاعدة البيانات."
-    };
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    return { success: false, message: errorMsg };
   }
 }
 
-export async function releaseConversationAction(conversationId: string): Promise<ActionResult> {
+export async function releaseConversationAction(
+  conversationId: string,
+  eventKey?: string,
+  summary?: string
+): Promise<ActionResult> {
   try {
-    const { adminClient, organizationId } = await requireOperatorAuth();
+    const { adminClient, organizationId, user } = await requireOperatorAuth();
     const clientWithRpc = adminClient as unknown as {
       rpc: (fn: string, args: Record<string, unknown>) => Promise<{ data: unknown; error: { code?: string; message: string } | null }>;
     };
+
+    const finalEventKey = eventKey || `release-${conversationId}-${Date.now()}`;
     const { data, error } = await clientWithRpc.rpc("ws_chatbot_release_conversation", {
+      p_organization_id: organizationId,
       p_conversation_id: conversationId,
-      p_organization_id: organizationId
+      p_actor_user_id: user.id,
+      p_event_key: finalEventKey,
+      p_summary: summary || null
     });
 
     if (error) {
-      if (error.code === "42883" || error.message.includes("function") || error.message.includes("does not exist")) {
-        return {
-          success: false,
-          blockedReason: "إجراء قيد الانتظار: الدالة الذرية ws_chatbot_release_conversation غير متوفرة في قاعدة البيانات حالياً."
-        };
-      }
       return { success: false, message: error.message };
     }
 
@@ -109,31 +119,32 @@ export async function releaseConversationAction(conversationId: string): Promise
     if (err instanceof AuthError) {
       return { success: false, message: err.message };
     }
-    return {
-      success: false,
-      blockedReason: "إجراء قيد الانتظار: يتطلب هذا الإجراء تطبيق الهجرة الذرية لقاعدة البيانات."
-    };
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    return { success: false, message: errorMsg };
   }
 }
 
-export async function closeConversationAction(conversationId: string): Promise<ActionResult> {
+export async function closeConversationAction(
+  conversationId: string,
+  eventKey?: string,
+  reason?: string
+): Promise<ActionResult> {
   try {
-    const { adminClient, organizationId } = await requireOperatorAuth();
+    const { adminClient, organizationId, user } = await requireOperatorAuth();
     const clientWithRpc = adminClient as unknown as {
       rpc: (fn: string, args: Record<string, unknown>) => Promise<{ data: unknown; error: { code?: string; message: string } | null }>;
     };
+
+    const finalEventKey = eventKey || `close-${conversationId}-${Date.now()}`;
     const { data, error } = await clientWithRpc.rpc("ws_chatbot_close_conversation", {
+      p_organization_id: organizationId,
       p_conversation_id: conversationId,
-      p_organization_id: organizationId
+      p_actor_user_id: user.id,
+      p_event_key: finalEventKey,
+      p_reason: reason || null
     });
 
     if (error) {
-      if (error.code === "42883" || error.message.includes("function") || error.message.includes("does not exist")) {
-        return {
-          success: false,
-          blockedReason: "إجراء قيد الانتظار: الدالة الذرية ws_chatbot_close_conversation غير متوفرة في قاعدة البيانات حالياً."
-        };
-      }
       return { success: false, message: error.message };
     }
 
@@ -142,10 +153,8 @@ export async function closeConversationAction(conversationId: string): Promise<A
     if (err instanceof AuthError) {
       return { success: false, message: err.message };
     }
-    return {
-      success: false,
-      blockedReason: "إجراء قيد الانتظار: يتطلب هذا الإجراء تطبيق الهجرة الذرية لقاعدة البيانات."
-    };
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    return { success: false, message: errorMsg };
   }
 }
 

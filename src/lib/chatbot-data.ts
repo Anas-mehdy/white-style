@@ -357,6 +357,21 @@ export async function getConversationMessages(conversationId: string) {
   return messages ?? [];
 }
 
+export async function getConversationEvents(conversationId: string) {
+  const supabase = await createClient();
+  const orgId = DEFAULT_ORGANIZATION_ID;
+
+  const { data: events, error } = await supabase
+    .from("ws_chatbot_conversation_events")
+    .select("*")
+    .eq("organization_id", orgId)
+    .eq("conversation_id", conversationId)
+    .order("created_at", { ascending: false });
+
+  if (error) return [];
+  return events ?? [];
+}
+
 /**
  * 5. Offers & Shipping Settings Data
  */
