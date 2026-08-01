@@ -1,7 +1,6 @@
 "use server";
 
-import { requireAdminAuth, AuthError } from "@/lib/supabase/server";
-import { DEFAULT_ORGANIZATION_ID } from "./chatbot-data";
+import { requireAdminAuth, requireOperatorAuth, AuthError } from "@/lib/supabase/server";
 import { ProductFormData, VariantFormData, MediaFormData } from "@/types/chatbot";
 
 export interface ActionResult<T = unknown> {
@@ -12,7 +11,8 @@ export interface ActionResult<T = unknown> {
 }
 
 /**
- * 1. Order Status RPC Mutation (Invokes ws_chatbot_set_order_status)
+ * 1. Operational Action: Order Status RPC Mutation
+ * Allowed for: owner, admin, operator (via requireOperatorAuth)
  */
 export async function setOrderStatusAction(
   orderId: string,
@@ -21,7 +21,7 @@ export async function setOrderStatusAction(
   actualShippingCost?: number
 ): Promise<ActionResult> {
   try {
-    const { adminClient } = await requireAdminAuth();
+    const { adminClient } = await requireOperatorAuth();
     
     // Call existing PostgreSQL RPC via admin client
     const { data, error } = await adminClient.rpc("ws_chatbot_set_order_status", {
@@ -47,18 +47,18 @@ export async function setOrderStatusAction(
 }
 
 /**
- * 2. Atomic Handoff RPC Actions
- * Strictly checks RPC availability. If RPC does not exist, blocks UI safely.
+ * 2. Operational Actions: Atomic Handoff Actions
+ * Allowed for: owner, admin, operator (via requireOperatorAuth)
  */
 export async function takeoverConversationAction(conversationId: string): Promise<ActionResult> {
   try {
-    const { adminClient } = await requireAdminAuth();
+    const { adminClient, organizationId } = await requireOperatorAuth();
     const clientWithRpc = adminClient as unknown as {
       rpc: (fn: string, args: Record<string, unknown>) => Promise<{ data: unknown; error: { code?: string; message: string } | null }>;
     };
     const { data, error } = await clientWithRpc.rpc("ws_chatbot_takeover_conversation", {
       p_conversation_id: conversationId,
-      p_organization_id: DEFAULT_ORGANIZATION_ID
+      p_organization_id: organizationId
     });
 
     if (error) {
@@ -85,13 +85,13 @@ export async function takeoverConversationAction(conversationId: string): Promis
 
 export async function releaseConversationAction(conversationId: string): Promise<ActionResult> {
   try {
-    const { adminClient } = await requireAdminAuth();
+    const { adminClient, organizationId } = await requireOperatorAuth();
     const clientWithRpc = adminClient as unknown as {
       rpc: (fn: string, args: Record<string, unknown>) => Promise<{ data: unknown; error: { code?: string; message: string } | null }>;
     };
     const { data, error } = await clientWithRpc.rpc("ws_chatbot_release_conversation", {
       p_conversation_id: conversationId,
-      p_organization_id: DEFAULT_ORGANIZATION_ID
+      p_organization_id: organizationId
     });
 
     if (error) {
@@ -118,13 +118,13 @@ export async function releaseConversationAction(conversationId: string): Promise
 
 export async function closeConversationAction(conversationId: string): Promise<ActionResult> {
   try {
-    const { adminClient } = await requireAdminAuth();
+    const { adminClient, organizationId } = await requireOperatorAuth();
     const clientWithRpc = adminClient as unknown as {
       rpc: (fn: string, args: Record<string, unknown>) => Promise<{ data: unknown; error: { code?: string; message: string } | null }>;
     };
     const { data, error } = await clientWithRpc.rpc("ws_chatbot_close_conversation", {
       p_conversation_id: conversationId,
-      p_organization_id: DEFAULT_ORGANIZATION_ID
+      p_organization_id: organizationId
     });
 
     if (error) {
@@ -150,12 +150,12 @@ export async function closeConversationAction(conversationId: string): Promise<A
 }
 
 /**
- * 3. Product & Variant CRUD Actions (Protected by requireAdminAuth)
+ * 3. Admin-Only Action: Product CRUD (Requires role 'owner' or 'admin')
+ * Any organization_id provided in input is ignored; uses verified organizationId from membership.
  */
 export async function saveProductAction(formData: ProductFormData, id?: string): Promise<ActionResult> {
   try {
-    const { adminClient } = await requireAdminAuth();
-    const orgId = DEFAULT_ORGANIZATION_ID;
+    const { adminClient, organizationId } = await requireAdminAuth();
 
     if (id) {
       const { error } = await adminClient
@@ -175,7 +175,7 @@ export async function saveProductAction(formData: ProductFormData, id?: string):
           active: formData.active,
           updated_at: new Date().toISOString()
         })
-        .eq("organization_id", orgId)
+        .eq("organization_id", organizationId)
         .eq("id", id);
       if (error) return { success: false, message: error.message };
       return { success: true, message: "تم تحديث بيانات المنتج بنجاح" };
@@ -183,7 +183,7 @@ export async function saveProductAction(formData: ProductFormData, id?: string):
       const { data, error } = await adminClient
         .from("ws_chatbot_products")
         .insert({
-          organization_id: orgId,
+          organization_id: organizationId,
           sku: formData.sku || null,
           name_ar: formData.name_ar || null,
           name_he: formData.name_he || null,
@@ -203,15 +203,20 @@ export async function saveProductAction(formData: ProductFormData, id?: string):
       return { success: true, message: "تم إنشاء المنتج بنجاح", data };
     }
   } catch (err: unknown) {
+    if (err instanceof AuthError) {
+      return { success: false, message: err.message };
+    }
     const errorMsg = err instanceof Error ? err.message : String(err);
     return { success: false, message: errorMsg };
   }
 }
 
+/**
+ * 4. Admin-Only Action: Variant CRUD (Requires role 'owner' or 'admin')
+ */
 export async function saveVariantAction(productId: string, formData: VariantFormData, id?: string): Promise<ActionResult> {
   try {
-    const { adminClient } = await requireAdminAuth();
-    const orgId = DEFAULT_ORGANIZATION_ID;
+    const { adminClient, organizationId } = await requireAdminAuth();
 
     if (id) {
       const { error } = await adminClient
@@ -229,7 +234,7 @@ export async function saveVariantAction(productId: string, formData: VariantForm
           active: formData.active,
           updated_at: new Date().toISOString()
         })
-        .eq("organization_id", orgId)
+        .eq("organization_id", organizationId)
         .eq("id", id);
       if (error) return { success: false, message: error.message };
       return { success: true, message: "تم تحديث نوع المنتج بنجاح" };
@@ -237,7 +242,7 @@ export async function saveVariantAction(productId: string, formData: VariantForm
       const { error } = await adminClient
         .from("ws_chatbot_product_variants")
         .insert({
-          organization_id: orgId,
+          organization_id: organizationId,
           product_id: productId,
           sku: formData.sku || null,
           color_code: formData.color_code || null,
@@ -254,20 +259,25 @@ export async function saveVariantAction(productId: string, formData: VariantForm
       return { success: true, message: "تم إضافة نوع جديد للمنتج بنجاح" };
     }
   } catch (err: unknown) {
+    if (err instanceof AuthError) {
+      return { success: false, message: err.message };
+    }
     const errorMsg = err instanceof Error ? err.message : String(err);
     return { success: false, message: errorMsg };
   }
 }
 
+/**
+ * 5. Admin-Only Action: Media CRUD (Requires role 'owner' or 'admin')
+ */
 export async function saveMediaAction(productId: string, formData: MediaFormData): Promise<ActionResult> {
   try {
-    const { adminClient } = await requireAdminAuth();
-    const orgId = DEFAULT_ORGANIZATION_ID;
+    const { adminClient, organizationId } = await requireAdminAuth();
 
     const { error } = await adminClient
       .from("ws_chatbot_product_media")
       .insert({
-        organization_id: orgId,
+        organization_id: organizationId,
         product_id: productId,
         variant_id: formData.variant_id || null,
         media_url: formData.media_url,
@@ -283,23 +293,25 @@ export async function saveMediaAction(productId: string, formData: MediaFormData
     if (error) return { success: false, message: error.message };
     return { success: true, message: "تم إضافة الوسيط بنجاح" };
   } catch (err: unknown) {
+    if (err instanceof AuthError) {
+      return { success: false, message: err.message };
+    }
     const errorMsg = err instanceof Error ? err.message : String(err);
     return { success: false, message: errorMsg };
   }
 }
 
 /**
- * 4. Discount Rule & Shipping Actions
+ * 6. Admin-Only Action: Discount Rules CRUD (Requires role 'owner' or 'admin')
  */
 export async function saveDiscountRuleAction(ruleName: string, type: string, val: number, minQty: number, prodId?: string): Promise<ActionResult> {
   try {
-    const { adminClient } = await requireAdminAuth();
-    const orgId = DEFAULT_ORGANIZATION_ID;
+    const { adminClient, organizationId } = await requireAdminAuth();
 
     const { error } = await adminClient
       .from("ws_chatbot_discount_rules")
       .insert({
-        organization_id: orgId,
+        organization_id: organizationId,
         name: ruleName,
         discount_type: type,
         discount_value: val,
@@ -312,23 +324,25 @@ export async function saveDiscountRuleAction(ruleName: string, type: string, val
     if (error) return { success: false, message: error.message };
     return { success: true, message: "تم إضافة قاعدة الخصم بنجاح" };
   } catch (err: unknown) {
+    if (err instanceof AuthError) {
+      return { success: false, message: err.message };
+    }
     const errorMsg = err instanceof Error ? err.message : String(err);
     return { success: false, message: errorMsg };
   }
 }
 
 /**
- * 5. Ad Product Mapping Action (Supports multiple products per ad)
+ * 7. Admin-Only Action: Ad Product Mapping (Requires role 'owner' or 'admin')
  */
 export async function saveAdProductMappingAction(adId: string, productId: string, priority = 1): Promise<ActionResult> {
   try {
-    const { adminClient } = await requireAdminAuth();
-    const orgId = DEFAULT_ORGANIZATION_ID;
+    const { adminClient, organizationId } = await requireAdminAuth();
 
     const { error } = await adminClient
       .from("ws_chatbot_ad_product_mappings")
       .insert({
-        organization_id: orgId,
+        organization_id: organizationId,
         ad_id: adId,
         product_id: productId,
         priority: priority,
@@ -339,6 +353,9 @@ export async function saveAdProductMappingAction(adId: string, productId: string
     if (error) return { success: false, message: error.message };
     return { success: true, message: "تم ربط الإعلان بالمنتج بنجاح" };
   } catch (err: unknown) {
+    if (err instanceof AuthError) {
+      return { success: false, message: err.message };
+    }
     const errorMsg = err instanceof Error ? err.message : String(err);
     return { success: false, message: errorMsg };
   }
