@@ -1,6 +1,6 @@
 "use server";
 
-import { createClient } from "@/lib/supabase/server";
+import { requireAdminAuth, AuthError } from "@/lib/supabase/server";
 import { DEFAULT_ORGANIZATION_ID } from "./chatbot-data";
 import { ProductFormData, VariantFormData, MediaFormData } from "@/types/chatbot";
 
@@ -21,10 +21,10 @@ export async function setOrderStatusAction(
   actualShippingCost?: number
 ): Promise<ActionResult> {
   try {
-    const supabase = await createClient();
+    const { adminClient } = await requireAdminAuth();
     
-    // Call existing PostgreSQL RPC
-    const { data, error } = await supabase.rpc("ws_chatbot_set_order_status", {
+    // Call existing PostgreSQL RPC via admin client
+    const { data, error } = await adminClient.rpc("ws_chatbot_set_order_status", {
       p_order_id: orderId,
       p_status: newStatus,
       p_idempotency_key: idempotencyKey,
@@ -38,6 +38,9 @@ export async function setOrderStatusAction(
 
     return { success: true, message: "تم تحديث حالة الطلب بنجاح", data };
   } catch (err: unknown) {
+    if (err instanceof AuthError) {
+      return { success: false, message: err.message };
+    }
     const errorMsg = err instanceof Error ? err.message : String(err);
     return { success: false, message: `خطأ في خادم التنفيذ: ${errorMsg}` };
   }
@@ -49,8 +52,8 @@ export async function setOrderStatusAction(
  */
 export async function takeoverConversationAction(conversationId: string): Promise<ActionResult> {
   try {
-    const supabase = await createClient();
-    const clientWithRpc = supabase as unknown as {
+    const { adminClient } = await requireAdminAuth();
+    const clientWithRpc = adminClient as unknown as {
       rpc: (fn: string, args: Record<string, unknown>) => Promise<{ data: unknown; error: { code?: string; message: string } | null }>;
     };
     const { data, error } = await clientWithRpc.rpc("ws_chatbot_takeover_conversation", {
@@ -69,7 +72,10 @@ export async function takeoverConversationAction(conversationId: string): Promis
     }
 
     return { success: true, message: "تم استلام المحادثة وتحويلها للموظف بنجاح", data };
-  } catch {
+  } catch (err: unknown) {
+    if (err instanceof AuthError) {
+      return { success: false, message: err.message };
+    }
     return {
       success: false,
       blockedReason: "إجراء قيد الانتظار: يتطلب هذا الإجراء تطبيق الهجرة الذرية لقاعدة البيانات."
@@ -79,8 +85,8 @@ export async function takeoverConversationAction(conversationId: string): Promis
 
 export async function releaseConversationAction(conversationId: string): Promise<ActionResult> {
   try {
-    const supabase = await createClient();
-    const clientWithRpc = supabase as unknown as {
+    const { adminClient } = await requireAdminAuth();
+    const clientWithRpc = adminClient as unknown as {
       rpc: (fn: string, args: Record<string, unknown>) => Promise<{ data: unknown; error: { code?: string; message: string } | null }>;
     };
     const { data, error } = await clientWithRpc.rpc("ws_chatbot_release_conversation", {
@@ -99,7 +105,10 @@ export async function releaseConversationAction(conversationId: string): Promise
     }
 
     return { success: true, message: "تم إعادة المحادثة للبوت الآلي بنجاح", data };
-  } catch {
+  } catch (err: unknown) {
+    if (err instanceof AuthError) {
+      return { success: false, message: err.message };
+    }
     return {
       success: false,
       blockedReason: "إجراء قيد الانتظار: يتطلب هذا الإجراء تطبيق الهجرة الذرية لقاعدة البيانات."
@@ -109,8 +118,8 @@ export async function releaseConversationAction(conversationId: string): Promise
 
 export async function closeConversationAction(conversationId: string): Promise<ActionResult> {
   try {
-    const supabase = await createClient();
-    const clientWithRpc = supabase as unknown as {
+    const { adminClient } = await requireAdminAuth();
+    const clientWithRpc = adminClient as unknown as {
       rpc: (fn: string, args: Record<string, unknown>) => Promise<{ data: unknown; error: { code?: string; message: string } | null }>;
     };
     const { data, error } = await clientWithRpc.rpc("ws_chatbot_close_conversation", {
@@ -129,7 +138,10 @@ export async function closeConversationAction(conversationId: string): Promise<A
     }
 
     return { success: true, message: "تم إغلاق المحادثة بنجاح", data };
-  } catch {
+  } catch (err: unknown) {
+    if (err instanceof AuthError) {
+      return { success: false, message: err.message };
+    }
     return {
       success: false,
       blockedReason: "إجراء قيد الانتظار: يتطلب هذا الإجراء تطبيق الهجرة الذرية لقاعدة البيانات."
@@ -138,15 +150,15 @@ export async function closeConversationAction(conversationId: string): Promise<A
 }
 
 /**
- * 3. Product & Variant CRUD Actions
+ * 3. Product & Variant CRUD Actions (Protected by requireAdminAuth)
  */
 export async function saveProductAction(formData: ProductFormData, id?: string): Promise<ActionResult> {
   try {
-    const supabase = await createClient();
+    const { adminClient } = await requireAdminAuth();
     const orgId = DEFAULT_ORGANIZATION_ID;
 
     if (id) {
-      const { error } = await supabase
+      const { error } = await adminClient
         .from("ws_chatbot_products")
         .update({
           sku: formData.sku || null,
@@ -168,7 +180,7 @@ export async function saveProductAction(formData: ProductFormData, id?: string):
       if (error) return { success: false, message: error.message };
       return { success: true, message: "تم تحديث بيانات المنتج بنجاح" };
     } else {
-      const { data, error } = await supabase
+      const { data, error } = await adminClient
         .from("ws_chatbot_products")
         .insert({
           organization_id: orgId,
@@ -198,11 +210,11 @@ export async function saveProductAction(formData: ProductFormData, id?: string):
 
 export async function saveVariantAction(productId: string, formData: VariantFormData, id?: string): Promise<ActionResult> {
   try {
-    const supabase = await createClient();
+    const { adminClient } = await requireAdminAuth();
     const orgId = DEFAULT_ORGANIZATION_ID;
 
     if (id) {
-      const { error } = await supabase
+      const { error } = await adminClient
         .from("ws_chatbot_product_variants")
         .update({
           sku: formData.sku || null,
@@ -222,7 +234,7 @@ export async function saveVariantAction(productId: string, formData: VariantForm
       if (error) return { success: false, message: error.message };
       return { success: true, message: "تم تحديث نوع المنتج بنجاح" };
     } else {
-      const { error } = await supabase
+      const { error } = await adminClient
         .from("ws_chatbot_product_variants")
         .insert({
           organization_id: orgId,
@@ -249,10 +261,10 @@ export async function saveVariantAction(productId: string, formData: VariantForm
 
 export async function saveMediaAction(productId: string, formData: MediaFormData): Promise<ActionResult> {
   try {
-    const supabase = await createClient();
+    const { adminClient } = await requireAdminAuth();
     const orgId = DEFAULT_ORGANIZATION_ID;
 
-    const { error } = await supabase
+    const { error } = await adminClient
       .from("ws_chatbot_product_media")
       .insert({
         organization_id: orgId,
@@ -281,10 +293,10 @@ export async function saveMediaAction(productId: string, formData: MediaFormData
  */
 export async function saveDiscountRuleAction(ruleName: string, type: string, val: number, minQty: number, prodId?: string): Promise<ActionResult> {
   try {
-    const supabase = await createClient();
+    const { adminClient } = await requireAdminAuth();
     const orgId = DEFAULT_ORGANIZATION_ID;
 
-    const { error } = await supabase
+    const { error } = await adminClient
       .from("ws_chatbot_discount_rules")
       .insert({
         organization_id: orgId,
@@ -310,10 +322,10 @@ export async function saveDiscountRuleAction(ruleName: string, type: string, val
  */
 export async function saveAdProductMappingAction(adId: string, productId: string, priority = 1): Promise<ActionResult> {
   try {
-    const supabase = await createClient();
+    const { adminClient } = await requireAdminAuth();
     const orgId = DEFAULT_ORGANIZATION_ID;
 
-    const { error } = await supabase
+    const { error } = await adminClient
       .from("ws_chatbot_ad_product_mappings")
       .insert({
         organization_id: orgId,

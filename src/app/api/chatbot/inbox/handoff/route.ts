@@ -4,9 +4,13 @@ import {
   releaseConversationAction,
   closeConversationAction
 } from "@/lib/chatbot-actions";
+import { requireAdminAuth, AuthError } from "@/lib/supabase/server";
 
 export async function POST(request: Request) {
   try {
+    // Step 1 & 2: Verify Authentication & Authorization Guard
+    await requireAdminAuth();
+
     const body = await request.json();
     const { action, conversationId } = body;
 
@@ -30,6 +34,9 @@ export async function POST(request: Request) {
 
     return NextResponse.json(result);
   } catch (error: unknown) {
+    if (error instanceof AuthError) {
+      return NextResponse.json({ success: false, message: error.message }, { status: error.statusCode });
+    }
     const message = error instanceof Error ? error.message : "خطأ غير متوقع في خادم المعالجة";
     return NextResponse.json({ success: false, message }, { status: 500 });
   }

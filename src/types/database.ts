@@ -1,4 +1,4 @@
-// Exact Supabase Database Row Types generated from live PostgREST schema introspection
+// Complete Supabase Database Row Types generated from live schema definitions
 
 export type Json =
   | string
@@ -15,24 +15,39 @@ export interface Database {
         Row: {
           id: string;
           organization_id: string;
+          name: string | null;
           provider: string | null;
+          provider_channel_id: string | null;
           bot_enabled: boolean | null;
+          text_buffer_seconds: number | null;
+          media_buffer_seconds: number | null;
+          default_language: string | null;
           created_at: string;
           updated_at: string | null;
         };
         Insert: {
           id?: string;
           organization_id: string;
+          name?: string | null;
           provider?: string | null;
+          provider_channel_id?: string | null;
           bot_enabled?: boolean | null;
+          text_buffer_seconds?: number | null;
+          media_buffer_seconds?: number | null;
+          default_language?: string | null;
           created_at?: string;
           updated_at?: string | null;
         };
         Update: {
           id?: string;
           organization_id?: string;
+          name?: string | null;
           provider?: string | null;
+          provider_channel_id?: string | null;
           bot_enabled?: boolean | null;
+          text_buffer_seconds?: number | null;
+          media_buffer_seconds?: number | null;
+          default_language?: string | null;
           created_at?: string;
           updated_at?: string | null;
         };
@@ -41,6 +56,11 @@ export interface Database {
         Row: {
           id: string;
           organization_id: string;
+          phone_number: string | null;
+          full_name: string | null;
+          address: string | null;
+          city: string | null;
+          language: string | null;
           notes: string | null;
           metadata: Json | null;
           created_at: string;
@@ -49,6 +69,11 @@ export interface Database {
         Insert: {
           id?: string;
           organization_id: string;
+          phone_number?: string | null;
+          full_name?: string | null;
+          address?: string | null;
+          city?: string | null;
+          language?: string | null;
           notes?: string | null;
           metadata?: Json | null;
           created_at?: string;
@@ -57,6 +82,11 @@ export interface Database {
         Update: {
           id?: string;
           organization_id?: string;
+          phone_number?: string | null;
+          full_name?: string | null;
+          address?: string | null;
+          city?: string | null;
+          language?: string | null;
           notes?: string | null;
           metadata?: Json | null;
           created_at?: string;
@@ -73,6 +103,11 @@ export interface Database {
           status: 'open' | 'closed' | 'waiting_handoff' | string;
           state: string | null;
           language: string | null;
+          unread_count: number | null;
+          assigned_to: string | null;
+          source_id: string | null;
+          ctwa_clid: string | null;
+          last_message_at: string | null;
           created_at: string;
           updated_at: string | null;
         };
@@ -85,6 +120,11 @@ export interface Database {
           status?: string;
           state?: string | null;
           language?: string | null;
+          unread_count?: number | null;
+          assigned_to?: string | null;
+          source_id?: string | null;
+          ctwa_clid?: string | null;
+          last_message_at?: string | null;
           created_at?: string;
           updated_at?: string | null;
         };
@@ -97,6 +137,11 @@ export interface Database {
           status?: string;
           state?: string | null;
           language?: string | null;
+          unread_count?: number | null;
+          assigned_to?: string | null;
+          source_id?: string | null;
+          ctwa_clid?: string | null;
+          last_message_at?: string | null;
           created_at?: string;
           updated_at?: string | null;
         };
@@ -108,7 +153,12 @@ export interface Database {
           conversation_id: string;
           sender_type: 'customer' | 'bot' | 'human' | string;
           message_type: 'text' | 'image' | 'video' | 'audio' | 'document' | string;
+          direction: 'inbound' | 'outbound' | string | null;
+          content: string | null;
           media_url: string | null;
+          storage_path: string | null;
+          provider_message_id: string | null;
+          metadata: Json | null;
           created_at: string;
         };
         Insert: {
@@ -117,7 +167,12 @@ export interface Database {
           conversation_id: string;
           sender_type: string;
           message_type: string;
+          direction?: string | null;
+          content?: string | null;
           media_url?: string | null;
+          storage_path?: string | null;
+          provider_message_id?: string | null;
+          metadata?: Json | null;
           created_at?: string;
         };
         Update: {
@@ -126,27 +181,41 @@ export interface Database {
           conversation_id?: string;
           sender_type?: string;
           message_type?: string;
+          direction?: string | null;
+          content?: string | null;
           media_url?: string | null;
+          storage_path?: string | null;
+          provider_message_id?: string | null;
+          metadata?: Json | null;
           created_at?: string;
         };
       };
       ws_chatbot_message_buffers: {
         Row: {
+          id: string | null;
           organization_id: string;
           conversation_id: string;
+          buffer_type: string | null;
           status: string | null;
+          expires_at: string | null;
           updated_at: string | null;
         };
         Insert: {
+          id?: string | null;
           organization_id: string;
           conversation_id: string;
+          buffer_type?: string | null;
           status?: string | null;
+          expires_at?: string | null;
           updated_at?: string | null;
         };
         Update: {
+          id?: string | null;
           organization_id?: string;
           conversation_id?: string;
+          buffer_type?: string | null;
           status?: string | null;
+          expires_at?: string | null;
           updated_at?: string | null;
         };
       };
@@ -216,10 +285,13 @@ export interface Database {
           color_ar: string | null;
           color_he: string | null;
           color_en: string | null;
+          size: string | null;
           price: number | null;
           compare_at_price: number | null;
           unit_cost: number | null;
           stock_quantity: number | null;
+          is_untracked_stock: boolean | null;
+          is_available: boolean | null;
           active: boolean | null;
           created_at: string;
           updated_at: string | null;
@@ -233,10 +305,13 @@ export interface Database {
           color_ar?: string | null;
           color_he?: string | null;
           color_en?: string | null;
+          size?: string | null;
           price?: number | null;
           compare_at_price?: number | null;
           unit_cost?: number | null;
           stock_quantity?: number | null;
+          is_untracked_stock?: boolean | null;
+          is_available?: boolean | null;
           active?: boolean | null;
           created_at?: string;
           updated_at?: string | null;
@@ -250,10 +325,13 @@ export interface Database {
           color_ar?: string | null;
           color_he?: string | null;
           color_en?: string | null;
+          size?: string | null;
           price?: number | null;
           compare_at_price?: number | null;
           unit_cost?: number | null;
           stock_quantity?: number | null;
+          is_untracked_stock?: boolean | null;
+          is_available?: boolean | null;
           active?: boolean | null;
           created_at?: string;
           updated_at?: string | null;
@@ -337,6 +415,11 @@ export interface Database {
           id: string;
           organization_id: string;
           name_ar: string;
+          code: string | null;
+          customer_shipping_fee: number | null;
+          actual_shipping_cost: number | null;
+          carrier: string | null;
+          delivery_days: number | null;
           active: boolean | null;
           created_at: string;
           updated_at: string | null;
@@ -345,6 +428,11 @@ export interface Database {
           id?: string;
           organization_id: string;
           name_ar: string;
+          code?: string | null;
+          customer_shipping_fee?: number | null;
+          actual_shipping_cost?: number | null;
+          carrier?: string | null;
+          delivery_days?: number | null;
           active?: boolean | null;
           created_at?: string;
           updated_at?: string | null;
@@ -353,6 +441,11 @@ export interface Database {
           id?: string;
           organization_id?: string;
           name_ar?: string;
+          code?: string | null;
+          customer_shipping_fee?: number | null;
+          actual_shipping_cost?: number | null;
+          carrier?: string | null;
+          delivery_days?: number | null;
           active?: boolean | null;
           created_at?: string;
           updated_at?: string | null;
@@ -503,6 +596,8 @@ export interface Database {
           customer_id: string | null;
           status: 'draft' | 'collecting' | 'awaiting_confirmation' | 'confirmed' | 'shipped' | 'delivered' | 'cancelled' | 'returned' | string;
           shipping_zone_id: string | null;
+          customer_address: string | null;
+          discount_amount: number | null;
           subtotal: number | null;
           shipping_fee: number | null;
           actual_shipping_cost: number | null;
@@ -510,6 +605,9 @@ export interface Database {
           total: number | null;
           gross_profit: number | null;
           ad_id: string | null;
+          ad_set_id: string | null;
+          campaign_id: string | null;
+          ad_account_id: string | null;
           idempotency_key: string | null;
           created_at: string;
           updated_at: string | null;
@@ -521,6 +619,8 @@ export interface Database {
           customer_id?: string | null;
           status?: string;
           shipping_zone_id?: string | null;
+          customer_address?: string | null;
+          discount_amount?: number | null;
           subtotal?: number | null;
           shipping_fee?: number | null;
           actual_shipping_cost?: number | null;
@@ -528,6 +628,9 @@ export interface Database {
           total?: number | null;
           gross_profit?: number | null;
           ad_id?: string | null;
+          ad_set_id?: string | null;
+          campaign_id?: string | null;
+          ad_account_id?: string | null;
           idempotency_key?: string | null;
           created_at?: string;
           updated_at?: string | null;
@@ -539,6 +642,8 @@ export interface Database {
           customer_id?: string | null;
           status?: string;
           shipping_zone_id?: string | null;
+          customer_address?: string | null;
+          discount_amount?: number | null;
           subtotal?: number | null;
           shipping_fee?: number | null;
           actual_shipping_cost?: number | null;
@@ -546,6 +651,9 @@ export interface Database {
           total?: number | null;
           gross_profit?: number | null;
           ad_id?: string | null;
+          ad_set_id?: string | null;
+          campaign_id?: string | null;
+          ad_account_id?: string | null;
           idempotency_key?: string | null;
           created_at?: string;
           updated_at?: string | null;
@@ -559,10 +667,12 @@ export interface Database {
           product_id: string | null;
           variant_id: string | null;
           product_name_snapshot: string | null;
+          variant_name_snapshot: string | null;
           sku_snapshot: string | null;
           quantity: number;
           unit_price: number | null;
           unit_cost: number | null;
+          total_price: number | null;
           created_at: string;
           updated_at: string | null;
         };
@@ -573,10 +683,12 @@ export interface Database {
           product_id?: string | null;
           variant_id?: string | null;
           product_name_snapshot?: string | null;
+          variant_name_snapshot?: string | null;
           sku_snapshot?: string | null;
           quantity: number;
           unit_price?: number | null;
           unit_cost?: number | null;
+          total_price?: number | null;
           created_at?: string;
           updated_at?: string | null;
         };
@@ -587,10 +699,12 @@ export interface Database {
           product_id?: string | null;
           variant_id?: string | null;
           product_name_snapshot?: string | null;
+          variant_name_snapshot?: string | null;
           sku_snapshot?: string | null;
           quantity?: number;
           unit_price?: number | null;
           unit_cost?: number | null;
+          total_price?: number | null;
           created_at?: string;
           updated_at?: string | null;
         };
@@ -638,8 +752,12 @@ export interface Database {
           id: string;
           organization_id: string;
           conversation_id: string;
+          assigned_to: string | null;
           status: string;
+          priority: number | null;
+          summary: string | null;
           reason: string | null;
+          notes: string | null;
           created_at: string;
           resolved_at: string | null;
           updated_at: string | null;
@@ -648,8 +766,12 @@ export interface Database {
           id?: string;
           organization_id: string;
           conversation_id: string;
+          assigned_to?: string | null;
           status: string;
+          priority?: number | null;
+          summary?: string | null;
           reason?: string | null;
+          notes?: string | null;
           created_at?: string;
           resolved_at?: string | null;
           updated_at?: string | null;
@@ -658,8 +780,12 @@ export interface Database {
           id?: string;
           organization_id?: string;
           conversation_id?: string;
+          assigned_to?: string | null;
           status?: string;
+          priority?: number | null;
+          summary?: string | null;
           reason?: string | null;
+          notes?: string | null;
           created_at?: string;
           resolved_at?: string | null;
           updated_at?: string | null;
@@ -670,24 +796,36 @@ export interface Database {
           id: string;
           organization_id: string;
           order_id: string;
+          event_type: string | null;
           status: string;
+          error_message: string | null;
+          retry_count: number | null;
           created_at: string;
+          processed_at: string | null;
           updated_at: string | null;
         };
         Insert: {
           id?: string;
           organization_id: string;
           order_id: string;
+          event_type?: string | null;
           status: string;
+          error_message?: string | null;
+          retry_count?: number | null;
           created_at?: string;
+          processed_at?: string | null;
           updated_at?: string | null;
         };
         Update: {
           id?: string;
           organization_id?: string;
           order_id?: string;
+          event_type?: string | null;
           status?: string;
+          error_message?: string | null;
+          retry_count?: number | null;
           created_at?: string;
+          processed_at?: string | null;
           updated_at?: string | null;
         };
       };
