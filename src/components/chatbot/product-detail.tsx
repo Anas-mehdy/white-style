@@ -39,10 +39,12 @@ export function ChatbotProductDetailClient({ initialData }: { initialData: Produ
     color_ar: "",
     color_he: "",
     color_en: "",
+    size_code: "FREE",
     price: 100,
     compare_at_price: null,
     unit_cost: 30,
     stock_quantity: 10,
+    availability: "in_stock",
     active: true
   });
 
@@ -378,7 +380,7 @@ export function ChatbotProductDetailClient({ initialData }: { initialData: Produ
                 </div>
                 <div>
                   <label style={{ fontSize: "12px", color: "var(--muted)", display: "block" }}>الكمية المخزنة</label>
-                  <input type="number" value={variantForm.stock_quantity} onChange={(e) => setVariantForm({ ...variantForm, stock_quantity: Number(e.target.value) })} style={{ width: "100%", padding: "8px 12px", borderRadius: "8px", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", color: "#fff" }} />
+                  <input type="number" value={variantForm.stock_quantity ?? ""} onChange={(e) => setVariantForm({ ...variantForm, stock_quantity: e.target.value === "" ? null : Number(e.target.value) })} style={{ width: "100%", padding: "8px 12px", borderRadius: "8px", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", color: "#fff" }} />
                 </div>
               </div>
               <div style={{ display: "flex", justifyContent: "flex-end", gap: "12px", marginTop: "12px" }}>
@@ -398,7 +400,7 @@ export function ChatbotProductDetailClient({ initialData }: { initialData: Produ
             <form onSubmit={handleCreateMedia} style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
               <div>
                 <label style={{ fontSize: "12px", color: "var(--muted)", display: "block" }}>رابط الصورة أو الفيديو (URL) *</label>
-                <input type="url" required value={mediaForm.media_url} onChange={(e) => setMediaForm({ ...mediaForm, media_url: e.target.value })} placeholder="https://..." style={{ width: "100%", padding: "8px 12px", borderRadius: "8px", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", color: "#fff", direction: "ltr" }} />
+                <input type="url" required value={mediaForm.media_url ?? ""} onChange={(e) => setMediaForm({ ...mediaForm, media_url: e.target.value })} placeholder="https://..." style={{ width: "100%", padding: "8px 12px", borderRadius: "8px", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", color: "#fff", direction: "ltr" }} />
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
                 <div>

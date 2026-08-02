@@ -1,18 +1,28 @@
 "use server";
 
 import { requireAdminAuth, requireOperatorAuth, AuthError } from "@/lib/supabase/server";
-import { ProductFormData, VariantFormData, MediaFormData } from "@/types/chatbot";
+import {
+  ProductFormData,
+  VariantFormData,
+  MediaFormData,
+  FullProductWizardPayload,
+  StructuredRpcResult
+} from "@/types/chatbot";
 
 export interface ActionResult<T = unknown> {
   success: boolean;
   message?: string;
   data?: T;
   blockedReason?: string;
+  code?: string;
+  details?: {
+    variant_ids?: string[];
+    order_ids?: string[];
+  };
 }
 
 /**
  * 1. Operational Action: Order Status RPC Mutation
- * Allowed for: owner, admin, operator (via requireOperatorAuth)
  */
 export async function setOrderStatusAction(
   orderId: string,
@@ -52,7 +62,6 @@ export async function setOrderStatusAction(
 
 /**
  * 2. Operational Actions: Atomic Handoff Actions
- * Allowed for: owner, admin, operator (via requireOperatorAuth)
  */
 export async function takeoverConversationAction(
   conversationId: string,
@@ -159,148 +168,74 @@ export async function closeConversationAction(
 }
 
 /**
- * 3. Admin-Only Action: Product CRUD (Requires role 'owner' or 'admin')
- * Any organization_id provided in input is ignored; uses verified organizationId from membership.
+ * 3. Media Upload & Signed URL Server Actions
  */
-export async function saveProductAction(formData: ProductFormData, id?: string): Promise<ActionResult> {
+export async function uploadProductMediaAction(
+  productId: string,
+  formData: FormData
+): Promise<ActionResult<{ storage_path: string; signed_url?: string }>> {
   try {
     const { adminClient, organizationId } = await requireAdminAuth();
-
-    if (id) {
-      const { error } = await adminClient
-        .from("ws_chatbot_products")
-        .update({
-          sku: formData.sku || null,
-          name_ar: formData.name_ar || null,
-          name_he: formData.name_he || null,
-          name_en: formData.name_en || null,
-          description_ar: formData.description_ar || null,
-          description_he: formData.description_he || null,
-          description_en: formData.description_en || null,
-          category: formData.category || null,
-          material: formData.material || null,
-          source_system: formData.source_system || null,
-          source_id: formData.source_id || null,
-          active: formData.active,
-          updated_at: new Date().toISOString()
-        })
-        .eq("organization_id", organizationId)
-        .eq("id", id);
-      if (error) return { success: false, message: error.message };
-      return { success: true, message: "تم تحديث بيانات المنتج بنجاح" };
-    } else {
-      const { data, error } = await adminClient
-        .from("ws_chatbot_products")
-        .insert({
-          organization_id: organizationId,
-          sku: formData.sku || null,
-          name_ar: formData.name_ar || null,
-          name_he: formData.name_he || null,
-          name_en: formData.name_en || null,
-          description_ar: formData.description_ar || null,
-          description_he: formData.description_he || null,
-          description_en: formData.description_en || null,
-          category: formData.category || null,
-          material: formData.material || null,
-          source_system: formData.source_system || null,
-          source_id: formData.source_id || null,
-          active: formData.active
-        })
-        .select("id")
-        .single();
-      if (error) return { success: false, message: error.message };
-      return { success: true, message: "تم إنشاء المنتج بنجاح", data };
+    
+    const file = formData.get("file") as File | null;
+    if (!file) {
+      return { success: false, message: "ملف الوسائط غير موجود" };
     }
-  } catch (err: unknown) {
-    if (err instanceof AuthError) {
-      return { success: false, message: err.message };
+
+    // Validate MIME types
+    const allowedImages = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
+    const allowedVideos = ["video/mp4", "video/webm", "video/quicktime"];
+    const isImage = allowedImages.includes(file.type);
+    const isVideo = allowedVideos.includes(file.type);
+
+    if (!isImage && !isVideo) {
+      return { success: false, message: "نوع الملف غير مدعوم. يرجى اختيار صورة (JPG, PNG, WEBP) أو فيديو (MP4)" };
     }
-    const errorMsg = err instanceof Error ? err.message : String(err);
-    return { success: false, message: errorMsg };
-  }
-}
 
-/**
- * 4. Admin-Only Action: Variant CRUD (Requires role 'owner' or 'admin')
- */
-export async function saveVariantAction(productId: string, formData: VariantFormData, id?: string): Promise<ActionResult> {
-  try {
-    const { adminClient, organizationId } = await requireAdminAuth();
-
-    if (id) {
-      const { error } = await adminClient
-        .from("ws_chatbot_product_variants")
-        .update({
-          sku: formData.sku || null,
-          color_code: formData.color_code || null,
-          color_ar: formData.color_ar || null,
-          color_he: formData.color_he || null,
-          color_en: formData.color_en || null,
-          price: formData.price,
-          compare_at_price: formData.compare_at_price,
-          unit_cost: formData.unit_cost,
-          stock_quantity: formData.stock_quantity,
-          active: formData.active,
-          updated_at: new Date().toISOString()
-        })
-        .eq("organization_id", organizationId)
-        .eq("id", id);
-      if (error) return { success: false, message: error.message };
-      return { success: true, message: "تم تحديث نوع المنتج بنجاح" };
-    } else {
-      const { error } = await adminClient
-        .from("ws_chatbot_product_variants")
-        .insert({
-          organization_id: organizationId,
-          product_id: productId,
-          sku: formData.sku || null,
-          color_code: formData.color_code || null,
-          color_ar: formData.color_ar || null,
-          color_he: formData.color_he || null,
-          color_en: formData.color_en || null,
-          price: formData.price,
-          compare_at_price: formData.compare_at_price,
-          unit_cost: formData.unit_cost,
-          stock_quantity: formData.stock_quantity,
-          active: formData.active
-        });
-      if (error) return { success: false, message: error.message };
-      return { success: true, message: "تم إضافة نوع جديد للمنتج بنجاح" };
+    // Validate Max Sizes (10MB for images, 50MB for video)
+    const maxSizeBytes = isImage ? 10 * 1024 * 1024 : 50 * 1024 * 1024;
+    if (file.size > maxSizeBytes) {
+      return {
+        success: false,
+        message: isImage ? "حجم الصورة يتجاوز الحد المسموح (10 ميجابايت)" : "حجم الفيديو يتجاوز الحد المسموح (50 ميجابايت)"
+      };
     }
-  } catch (err: unknown) {
-    if (err instanceof AuthError) {
-      return { success: false, message: err.message };
-    }
-    const errorMsg = err instanceof Error ? err.message : String(err);
-    return { success: false, message: errorMsg };
-  }
-}
 
-/**
- * 5. Admin-Only Action: Media CRUD (Requires role 'owner' or 'admin')
- */
-export async function saveMediaAction(productId: string, formData: MediaFormData): Promise<ActionResult> {
-  try {
-    const { adminClient, organizationId } = await requireAdminAuth();
+    // Generate filename server-side
+    const fileId = crypto.randomUUID();
+    const rawExt = file.name.split(".").pop() || (isImage ? "png" : "mp4");
+    const ext = rawExt.toLowerCase().replace(/[^a-z0-9]/g, "");
+    const fileName = `${fileId}.${ext}`;
+    const storagePath = `${organizationId}/${productId}/${fileName}`;
 
-    const { error } = await adminClient
-      .from("ws_chatbot_product_media")
-      .insert({
-        organization_id: organizationId,
-        product_id: productId,
-        variant_id: formData.variant_id || null,
-        media_url: formData.media_url,
-        storage_path: formData.storage_path || null,
-        media_type: formData.media_type,
-        option_number: formData.option_number,
-        sort_order: formData.sort_order,
-        alt_ar: formData.alt_ar || null,
-        alt_he: formData.alt_he || null,
-        alt_en: formData.alt_en || null
+    const arrayBuffer = await file.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+
+    const { error: uploadError } = await adminClient.storage
+      .from("ws-chatbot-products")
+      .upload(storagePath, buffer, {
+        contentType: file.type,
+        upsert: true
       });
 
-    if (error) return { success: false, message: error.message };
-    return { success: true, message: "تم إضافة الوسيط بنجاح" };
+    if (uploadError) {
+      console.error("[uploadProductMediaAction] Storage error:", uploadError);
+      return { success: false, message: `تعذر رفع الملف إلى التخزين: ${uploadError.message}` };
+    }
+
+    // Generate short-lived signed URL for display/preview (3600 seconds = 1 hour)
+    const { data: signedData } = await adminClient.storage
+      .from("ws-chatbot-products")
+      .createSignedUrl(storagePath, 3600);
+
+    return {
+      success: true,
+      message: "تم رفع الوسيط بنجاح",
+      data: {
+        storage_path: storagePath,
+        signed_url: signedData?.signedUrl
+      }
+    };
   } catch (err: unknown) {
     if (err instanceof AuthError) {
       return { success: false, message: err.message };
@@ -310,9 +245,188 @@ export async function saveMediaAction(productId: string, formData: MediaFormData
   }
 }
 
+export async function getSignedMediaUrlAction(storagePath: string): Promise<ActionResult<{ signed_url: string }>> {
+  try {
+    const { adminClient } = await requireAdminAuth();
+    const { data, error } = await adminClient.storage
+      .from("ws-chatbot-products")
+      .createSignedUrl(storagePath, 3600);
+
+    if (error || !data?.signedUrl) {
+      return { success: false, message: "تعذر إنشاء رابط العرض للوسيط" };
+    }
+
+    return { success: true, data: { signed_url: data.signedUrl } };
+  } catch (err: unknown) {
+    if (err instanceof AuthError) {
+      return { success: false, message: err.message };
+    }
+    return { success: false, message: "خطأ في إنشاء رابط العرض" };
+  }
+}
+
 /**
- * 6. Admin-Only Action: Discount Rules CRUD (Requires role 'owner' or 'admin')
+ * 4. Active Orders Check Action (UI Feedback)
  */
+export async function checkVariantActiveOrdersAction(
+  variantId: string
+): Promise<ActionResult<{ count: number; orderIds: string[] }>> {
+  try {
+    const { adminClient, organizationId } = await requireAdminAuth();
+    
+    const { data, error } = await adminClient
+      .from("ws_chatbot_order_items")
+      .select("order_id, ws_chatbot_orders!inner(id, status)")
+      .eq("organization_id", organizationId)
+      .eq("variant_id", variantId)
+      .in("ws_chatbot_orders.status", ["draft", "collecting", "awaiting_confirmation", "confirmed", "shipped"]);
+
+    if (error) {
+      return { success: false, message: error.message };
+    }
+
+    const orderIds = Array.from(new Set((data || []).map((row: any) => row.order_id)));
+    return {
+      success: true,
+      data: {
+        count: orderIds.length,
+        orderIds
+      }
+    };
+  } catch (err: unknown) {
+    if (err instanceof AuthError) {
+      return { success: false, message: err.message };
+    }
+    return { success: false, message: "تعذر التحقق من الطلبات النشطة" };
+  }
+}
+
+/**
+ * 5. Transactional Product Bundle Save Server Action
+ */
+export async function saveProductBundleAction(
+  payload: FullProductWizardPayload,
+  idempotencyKey?: string,
+  newlyUploadedStoragePaths?: string[]
+): Promise<ActionResult<StructuredRpcResult>> {
+  try {
+    const { adminClient, organizationId, user } = await requireAdminAuth();
+
+    const fullRpcPayload = {
+      ...payload,
+      organization_id: organizationId,
+      actor_user_id: user.id,
+      product_id: payload.product.id || null,
+      idempotency_key: idempotencyKey || null
+    };
+
+    const clientWithRpc = adminClient as unknown as {
+      rpc: (fn: string, args: Record<string, unknown>) => Promise<{ data: StructuredRpcResult | null; error: { code?: string; message: string } | null }>;
+    };
+
+    const { data, error } = await clientWithRpc.rpc("ws_chatbot_save_product_bundle", {
+      p_payload: fullRpcPayload
+    });
+
+    if (error) {
+      console.error("[saveProductBundleAction] Database RPC error:", error);
+      // Clean up newly uploaded files on RPC error
+      if (newlyUploadedStoragePaths && newlyUploadedStoragePaths.length > 0) {
+        await adminClient.storage.from("ws-chatbot-products").remove(newlyUploadedStoragePaths).catch(() => {});
+      }
+      return {
+        success: false,
+        message: `خطأ في حفظ بيانات المنتج: ${error.message}`
+      };
+    }
+
+    if (!data || data.success === false) {
+      // Clean up newly uploaded files on validation failure
+      if (newlyUploadedStoragePaths && newlyUploadedStoragePaths.length > 0) {
+        await adminClient.storage.from("ws-chatbot-products").remove(newlyUploadedStoragePaths).catch(() => {});
+      }
+
+      const code = data?.code;
+      const message = data?.message || "تعذر حفظ المنتج";
+
+      return {
+        success: false,
+        code,
+        message,
+        details: data?.details
+      };
+    }
+
+    return {
+      success: true,
+      message: "تم حفظ بيانات المنتج والأنواع والوسائط بنجاح",
+      data
+    };
+  } catch (err: unknown) {
+    // Clean up newly uploaded files on exception
+    if (newlyUploadedStoragePaths && newlyUploadedStoragePaths.length > 0) {
+      try {
+        const { adminClient } = await requireAdminAuth();
+        await adminClient.storage.from("ws-chatbot-products").remove(newlyUploadedStoragePaths).catch(() => {});
+      } catch {}
+    }
+
+    if (err instanceof AuthError) {
+      return { success: false, message: err.message };
+    }
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    return { success: false, message: `خطأ أثناء المعالجة: ${errorMsg}` };
+  }
+}
+
+/**
+ * Backwards compatibility CRUD actions
+ */
+export async function saveProductAction(formData: ProductFormData, id?: string): Promise<ActionResult> {
+  const payload: FullProductWizardPayload = {
+    product: {
+      id,
+      sku: formData.sku,
+      name_ar: formData.name_ar,
+      name_he: formData.name_he,
+      name_en: formData.name_en,
+      description_ar: formData.description_ar,
+      description_he: formData.description_he,
+      description_en: formData.description_en,
+      category: formData.category,
+      material: formData.material as unknown as Record<string, unknown>,
+      source_system: formData.source_system,
+      source_id: formData.source_id,
+      active: formData.active
+    },
+    variants: [],
+    media: [],
+    aliases: []
+  };
+
+  return saveProductBundleAction(payload);
+}
+
+export async function saveVariantAction(productId: string, formData: VariantFormData, id?: string): Promise<ActionResult> {
+  const payload: FullProductWizardPayload = {
+    product: { id, name_ar: "محدث" },
+    variants: [{ ...formData, id }],
+    media: [],
+    aliases: []
+  };
+  return saveProductBundleAction(payload);
+}
+
+export async function saveMediaAction(productId: string, formData: MediaFormData): Promise<ActionResult> {
+  const payload: FullProductWizardPayload = {
+    product: { id: productId, name_ar: "محدث" },
+    variants: [],
+    media: [formData],
+    aliases: []
+  };
+  return saveProductBundleAction(payload);
+}
+
 export async function saveDiscountRuleAction(ruleName: string, type: string, val: number, minQty: number, prodId?: string): Promise<ActionResult> {
   try {
     const { adminClient, organizationId } = await requireAdminAuth();
@@ -341,9 +455,6 @@ export async function saveDiscountRuleAction(ruleName: string, type: string, val
   }
 }
 
-/**
- * 7. Admin-Only Action: Ad Product Mapping (Requires role 'owner' or 'admin')
- */
 export async function saveAdProductMappingAction(adId: string, productId: string, priority = 1): Promise<ActionResult> {
   try {
     const { adminClient, organizationId } = await requireAdminAuth();

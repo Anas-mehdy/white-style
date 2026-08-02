@@ -2,9 +2,11 @@
 
 import React, { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { ChatbotNav } from "./chatbot-nav";
 import { ChatbotProduct, ChatbotProductVariant, ChatbotProductMedia, ProductFormData, VariantFormData } from "@/types/chatbot";
 import { saveProductAction, saveVariantAction } from "@/lib/chatbot-actions";
+import { ProductWizardModal } from "./product-wizard-modal";
 import { ToastContainer, Toast, EmptyState } from "./ui";
 import {
   Search,
@@ -31,6 +33,7 @@ export function ChatbotProductsClient({
   initialVariants: ChatbotProductVariant[];
   initialMedia: ChatbotProductMedia[];
 }) {
+  const router = useRouter();
   const [products, setProducts] = useState<ChatbotProduct[]>(initialProducts);
   const [variants] = useState<ChatbotProductVariant[]>(initialVariants);
   const [media] = useState<ChatbotProductMedia[]>(initialMedia);
@@ -41,6 +44,16 @@ export function ChatbotProductsClient({
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<ChatbotProduct | null>(null);
 
+  const emptyMaterial = {
+    fabric_ar: "",
+    fabric_he: "",
+    fabric_en: "",
+    composition: "",
+    fit: "",
+    season: "",
+    care_notes: ""
+  };
+
   const [formData, setFormData] = useState<ProductFormData>({
     sku: "",
     name_ar: "",
@@ -50,7 +63,7 @@ export function ChatbotProductsClient({
     description_he: "",
     description_en: "",
     category: "",
-    material: "",
+    material: emptyMaterial,
     source_system: "manual",
     source_id: "",
     active: true
@@ -72,7 +85,7 @@ export function ChatbotProductsClient({
       description_he: "",
       description_en: "",
       category: "",
-      material: "",
+      material: emptyMaterial,
       source_system: "manual",
       source_id: "",
       active: true
@@ -82,6 +95,7 @@ export function ChatbotProductsClient({
 
   const handleOpenEditModal = (p: ChatbotProduct) => {
     setEditingProduct(p);
+    const matObj = typeof p.material === "object" && p.material !== null ? (p.material as any) : {};
     setFormData({
       sku: p.sku || "",
       name_ar: p.name_ar || "",
@@ -91,7 +105,15 @@ export function ChatbotProductsClient({
       description_he: p.description_he || "",
       description_en: p.description_en || "",
       category: p.category || "",
-      material: p.material || "",
+      material: {
+        fabric_ar: matObj.fabric_ar || "",
+        fabric_he: matObj.fabric_he || "",
+        fabric_en: matObj.fabric_en || "",
+        composition: matObj.composition || "",
+        fit: matObj.fit || "",
+        season: matObj.season || "",
+        care_notes: matObj.care_notes || ""
+      },
       source_system: p.source_system || "manual",
       source_id: p.source_id || "",
       active: p.active ?? true
@@ -326,129 +348,19 @@ export function ChatbotProductsClient({
         </div>
       )}
 
-      {/* Product Create/Edit Modal */}
+      {/* Product 4-Step RTL Wizard Modal */}
       {isProductModalOpen && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            zIndex: 9999,
-            background: "rgba(0,0,0,0.75)",
-            backdropFilter: "blur(4px)",
-            display: "grid",
-            placeItems: "center",
-            padding: "16px"
+        <ProductWizardModal
+          initialProduct={editingProduct}
+          initialVariants={editingProduct ? variants.filter((v) => v.product_id === editingProduct.id) : []}
+          initialMedia={editingProduct ? media.filter((m) => m.product_id === editingProduct.id) : []}
+          isOpen={isProductModalOpen}
+          onClose={() => setIsProductModalOpen(false)}
+          onSaved={() => {
+            setIsProductModalOpen(false);
+            router.refresh();
           }}
-        >
-          <div
-            style={{
-              width: "100%",
-              maxWidth: "600px",
-              background: "#0f172a",
-              border: "1px solid rgba(255,255,255,0.15)",
-              borderRadius: "20px",
-              padding: "24px",
-              maxHeight: "90vh",
-              overflowY: "auto"
-            }}
-          >
-            <h3 style={{ fontSize: "18px", fontWeight: 700, color: "#fff", marginBottom: "16px" }}>
-              {editingProduct ? "تعديل المنتج" : "إضافة منتج جديد للكتالوج"}
-            </h3>
-
-            <form onSubmit={handleSubmitProduct} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-                <div>
-                  <label style={{ fontSize: "12px", color: "var(--muted)", display: "block", marginBottom: "4px" }}>رمز الـ SKU الرئيسي</label>
-                  <input
-                    type="text"
-                    value={formData.sku}
-                    onChange={(e) => setFormData({ ...formData, sku: e.target.value })}
-                    placeholder="مثال: WS-DR-001"
-                    style={{ width: "100%", padding: "8px 12px", borderRadius: "8px", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", color: "#fff" }}
-                  />
-                </div>
-                <div>
-                  <label style={{ fontSize: "12px", color: "var(--muted)", display: "block", marginBottom: "4px" }}>الفئة (Category)</label>
-                  <input
-                    type="text"
-                    value={formData.category}
-                    onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                    placeholder="مثال: فساتين، أطقم..."
-                    style={{ width: "100%", padding: "8px 12px", borderRadius: "8px", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", color: "#fff" }}
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label style={{ fontSize: "12px", color: "var(--muted)", display: "block", marginBottom: "4px" }}>اسم المنتج بالعربية *</label>
-                <input
-                  type="text"
-                  required
-                  value={formData.name_ar}
-                  onChange={(e) => setFormData({ ...formData, name_ar: e.target.value })}
-                  placeholder="اسم المنتج بالعربية..."
-                  style={{ width: "100%", padding: "8px 12px", borderRadius: "8px", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", color: "#fff" }}
-                />
-              </div>
-
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-                <div>
-                  <label style={{ fontSize: "12px", color: "var(--muted)", display: "block", marginBottom: "4px" }}>الاسم بالأنبرية (Hebrew)</label>
-                  <input
-                    type="text"
-                    value={formData.name_he}
-                    onChange={(e) => setFormData({ ...formData, name_he: e.target.value })}
-                    placeholder="اسم المنتج بالعبرية..."
-                    style={{ width: "100%", padding: "8px 12px", borderRadius: "8px", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", color: "#fff", direction: "rtl" }}
-                  />
-                </div>
-                <div>
-                  <label style={{ fontSize: "12px", color: "var(--muted)", display: "block", marginBottom: "4px" }}>الاسم بالإنجليزية (English)</label>
-                  <input
-                    type="text"
-                    value={formData.name_en}
-                    onChange={(e) => setFormData({ ...formData, name_en: e.target.value })}
-                    placeholder="Product name in English..."
-                    style={{ width: "100%", padding: "8px 12px", borderRadius: "8px", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", color: "#fff", direction: "ltr" }}
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label style={{ fontSize: "12px", color: "var(--muted)", display: "block", marginBottom: "4px" }}>الوصف بالعربية</label>
-                <textarea
-                  rows={3}
-                  value={formData.description_ar}
-                  onChange={(e) => setFormData({ ...formData, description_ar: e.target.value })}
-                  placeholder="تفاصيل ووصف المنتج بالعربية..."
-                  style={{ width: "100%", padding: "8px 12px", borderRadius: "8px", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", color: "#fff" }}
-                />
-              </div>
-
-              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                <input
-                  type="checkbox"
-                  id="activeCheck"
-                  checked={formData.active}
-                  onChange={(e) => setFormData({ ...formData, active: e.target.checked })}
-                />
-                <label htmlFor="activeCheck" style={{ fontSize: "14px", color: "#fff", cursor: "pointer" }}>
-                  منتج نشط ومتاح في الشات بوت
-                </label>
-              </div>
-
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: "12px", marginTop: "16px" }}>
-                <button type="button" onClick={() => setIsProductModalOpen(false)} className="btn" style={{ background: "rgba(255,255,255,0.08)", color: "#fff" }}>
-                  إلغاء
-                </button>
-                <button type="submit" className="btn primary-btn">
-                  حفظ المنتج
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+        />
       )}
     </div>
   );

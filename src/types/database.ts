@@ -231,7 +231,8 @@ export interface Database {
           description_he: string | null;
           description_en: string | null;
           category: string | null;
-          material: string | null;
+          material: Json | string | null;
+          metadata: Json | null;
           source_system: string | null;
           source_id: string | null;
           active: boolean | null;
@@ -249,7 +250,8 @@ export interface Database {
           description_he?: string | null;
           description_en?: string | null;
           category?: string | null;
-          material?: string | null;
+          material?: Json | string | null;
+          metadata?: Json | null;
           source_system?: string | null;
           source_id?: string | null;
           active?: boolean | null;
@@ -267,7 +269,8 @@ export interface Database {
           description_he?: string | null;
           description_en?: string | null;
           category?: string | null;
-          material?: string | null;
+          material?: Json | string | null;
+          metadata?: Json | null;
           source_system?: string | null;
           source_id?: string | null;
           active?: boolean | null;
@@ -286,13 +289,16 @@ export interface Database {
           color_he: string | null;
           color_en: string | null;
           size: string | null;
+          size_code: string | null;
           price: number | null;
           compare_at_price: number | null;
           unit_cost: number | null;
           stock_quantity: number | null;
+          availability: 'in_stock' | 'low_stock' | 'out_of_stock' | 'preorder' | string | null;
           is_untracked_stock: boolean | null;
           is_available: boolean | null;
           active: boolean | null;
+          attributes: Json | null;
           created_at: string;
           updated_at: string | null;
         };
@@ -306,13 +312,16 @@ export interface Database {
           color_he?: string | null;
           color_en?: string | null;
           size?: string | null;
+          size_code?: string | null;
           price?: number | null;
           compare_at_price?: number | null;
           unit_cost?: number | null;
           stock_quantity?: number | null;
+          availability?: string | null;
           is_untracked_stock?: boolean | null;
           is_available?: boolean | null;
           active?: boolean | null;
+          attributes?: Json | null;
           created_at?: string;
           updated_at?: string | null;
         };
@@ -326,13 +335,16 @@ export interface Database {
           color_he?: string | null;
           color_en?: string | null;
           size?: string | null;
+          size_code?: string | null;
           price?: number | null;
           compare_at_price?: number | null;
           unit_cost?: number | null;
           stock_quantity?: number | null;
+          availability?: string | null;
           is_untracked_stock?: boolean | null;
           is_available?: boolean | null;
           active?: boolean | null;
+          attributes?: Json | null;
           created_at?: string;
           updated_at?: string | null;
         };
@@ -351,6 +363,7 @@ export interface Database {
           alt_ar: string | null;
           alt_he: string | null;
           alt_en: string | null;
+          active: boolean | null;
           created_at: string;
         };
         Insert: {
@@ -366,6 +379,7 @@ export interface Database {
           alt_ar?: string | null;
           alt_he?: string | null;
           alt_en?: string | null;
+          active?: boolean | null;
           created_at?: string;
         };
         Update: {
@@ -381,6 +395,7 @@ export interface Database {
           alt_ar?: string | null;
           alt_he?: string | null;
           alt_en?: string | null;
+          active?: boolean | null;
           created_at?: string;
         };
       };
@@ -391,6 +406,7 @@ export interface Database {
           product_id: string;
           alias: string;
           language: string | null;
+          normalized_alias: string | null;
           created_at: string;
         };
         Insert: {
@@ -399,6 +415,7 @@ export interface Database {
           product_id: string;
           alias: string;
           language?: string | null;
+          normalized_alias?: string | null;
           created_at?: string;
         };
         Update: {
@@ -407,6 +424,7 @@ export interface Database {
           product_id?: string;
           alias?: string;
           language?: string | null;
+          normalized_alias?: string | null;
           created_at?: string;
         };
       };

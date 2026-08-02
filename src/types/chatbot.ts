@@ -78,6 +78,16 @@ export interface CampaignProfitability {
 }
 
 // Product & Variant Extended Form Types
+export interface MaterialFormData {
+  fabric_ar: string;
+  fabric_he: string;
+  fabric_en: string;
+  composition: string;
+  fit: string;
+  season: string;
+  care_notes: string;
+}
+
 export interface ProductFormData {
   sku: string;
   name_ar: string;
@@ -87,35 +97,88 @@ export interface ProductFormData {
   description_he: string;
   description_en: string;
   category: string;
-  material: string;
+  material: MaterialFormData;
   source_system: string;
   source_id: string;
   active: boolean;
 }
 
 export interface VariantFormData {
+  id?: string;
+  client_key?: string;
   sku: string;
   color_code: string;
   color_ar: string;
   color_he: string;
   color_en: string;
+  size_code: string;
   price: number;
   compare_at_price: number | null;
   unit_cost: number;
-  stock_quantity: number;
+  stock_quantity: number | null;
+  availability: 'in_stock' | 'low_stock' | 'out_of_stock' | 'preorder';
   active: boolean;
+  attributes?: Record<string, unknown>;
 }
 
 export interface MediaFormData {
+  id?: string;
   variant_id?: string | null;
-  media_url: string;
+  variant_client_key?: string | null;
+  media_url?: string | null;
   storage_path?: string | null;
   media_type: 'image' | 'video';
-  option_number: number; // 1, 2, 3...
+  option_number: number;
   sort_order: number;
   alt_ar: string;
   alt_he: string;
   alt_en: string;
+  preview_url?: string;
+}
+
+export interface AliasFormData {
+  id?: string;
+  alias: string;
+  language: 'ar' | 'he' | 'en' | string;
+}
+
+export interface FullProductWizardPayload {
+  product: {
+    id?: string;
+    sku?: string;
+    name_ar: string;
+    name_he?: string;
+    name_en?: string;
+    description_ar?: string;
+    description_he?: string;
+    description_en?: string;
+    category?: string;
+    material?: Record<string, unknown>;
+    metadata?: Record<string, unknown>;
+    source_system?: string;
+    source_id?: string;
+    active?: boolean;
+  };
+  variants: VariantFormData[];
+  media: MediaFormData[];
+  aliases: AliasFormData[];
+  deactivate_variant_ids?: string[];
+  delete_media_ids?: string[];
+  delete_alias_ids?: string[];
+  acknowledged_variant_deactivations?: string[];
+}
+
+export interface StructuredRpcResult {
+  success: boolean;
+  code?: string;
+  message?: string;
+  product_id?: string;
+  variant_id_map?: Record<string, string>;
+  warnings?: string[];
+  details?: {
+    variant_ids?: string[];
+    order_ids?: string[];
+  };
 }
 
 export interface ProductDetailViewModel {
