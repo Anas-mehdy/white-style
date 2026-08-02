@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Activity, BrainCircuit, LayoutDashboard, RefreshCw, Settings2, ShieldCheck, Target, Sun, Moon, Rocket, Menu, X, Sparkles, MessageSquare } from "lucide-react";
+import { Activity, BrainCircuit, LayoutDashboard, RefreshCw, Settings2, ShieldCheck, Target, Sun, Moon, Rocket, Menu, X, Sparkles, MessageSquare, LogOut, User } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { createClient } from "@/lib/supabase/client";
 import type { AccountRow, ChartPoint } from "@/lib/dashboard-data";
 import { isDashboardApiResponse, type DashboardApiResponse } from "@/types/dashboard";
 
@@ -32,14 +33,34 @@ const formatNumber = (n: number) =>
 
 export function Shell({ children }: { children: React.ReactNode }) {
   const p = usePathname();
+  const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
   const hamburgerRef = useRef<HTMLButtonElement>(null);
   const sidebarRef = useRef<HTMLElement>(null);
   const isFirstMount = useRef(true);
 
+  useEffect(() => {
+    const supabase = createClient();
+    supabase.auth.getUser().then(({ data }) => {
+      if (data?.user?.email) {
+        setUserEmail(data.user.email);
+      }
+    });
+  }, []);
+
+  const handleLogout = async () => {
+    // Requirement 10: After logout use signOut(), router.replace("/login"), then router.refresh().
+    const supabase = createClient();
+    await supabase.auth.signOut();
+    router.replace("/login");
+    router.refresh();
+  };
+
   // Close sidebar on page navigation
   useEffect(() => {
-    setIsOpen(false);
+    const timer = setTimeout(() => setIsOpen(false), 0);
+    return () => clearTimeout(timer);
   }, [p]);
 
   // Handle screen resize: close sidebar drawer if screen width expands to Desktop (> 1024px)
@@ -157,6 +178,43 @@ export function Shell({ children }: { children: React.ReactNode }) {
             </Link>
           ))}
         </nav>
+        <div className="sidebar-footer" style={{ marginTop: "auto" }}>
+          <div className="profile-avatar">
+            <User size={18} />
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <strong style={{ fontSize: "12px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", display: "block", direction: "ltr", textAlign: "right" }}>
+              {userEmail || "anasmehdy1994@gmail.com"}
+            </strong>
+            <span style={{ fontSize: "10.5px", color: "var(--sidebar-muted)", display: "block" }}>المالك المصرّح</span>
+          </div>
+          <button
+            onClick={handleLogout}
+            title="تسجيل الخروج"
+            aria-label="تسجيل الخروج"
+            style={{
+              background: "transparent",
+              border: "none",
+              color: "var(--sidebar-muted)",
+              cursor: "pointer",
+              padding: "6px",
+              borderRadius: "8px",
+              display: "grid",
+              placeItems: "center",
+              transition: "color 0.2s, background 0.2s",
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.color = "#ef4444";
+              e.currentTarget.style.background = "rgba(239, 68, 68, 0.1)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.color = "var(--sidebar-muted)";
+              e.currentTarget.style.background = "transparent";
+            }}
+          >
+            <LogOut size={18} />
+          </button>
+        </div>
       </aside>
       <main className="main-content">{children}</main>
     </div>
