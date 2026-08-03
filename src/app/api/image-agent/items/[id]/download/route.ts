@@ -28,18 +28,32 @@ export async function GET(
       );
     }
 
-    const { data, error: signedErr } = await supabase.storage
+    // Download the binary file directly from Supabase Storage
+    const { data: fileBlob, error: downloadErr } = await supabase.storage
       .from("image-agent")
-      .createSignedUrl(item.result_image_path, 300, { download: true });
+      .download(item.result_image_path);
 
-    if (signedErr || !data?.signedUrl) {
+    if (downloadErr || !fileBlob) {
       return NextResponse.json(
-        { error: "تعذر إنتاج رابط التنزيل" },
+        { error: "تعذر تحميل ملف الصورة" },
         { status: 500 }
       );
     }
 
-    return NextResponse.json({ downloadUrl: data.signedUrl });
+    const arrayBuffer = await fileBlob.arrayBuffer();
+    const contentType = item.result_mime_type || fileBlob.type || "image/png";
+    const ext = contentType.includes("jpeg") || contentType.includes("jpg") ? "jpg" : "png";
+    const fileName = `generated-image-${id.slice(0, 8)}.${ext}`;
+
+    return new NextResponse(arrayBuffer, {
+      status: 200,
+      headers: {
+        "Content-Type": contentType,
+        "Content-Disposition": `attachment; filename="${fileName}"`,
+        "Content-Length": arrayBuffer.byteLength.toString(),
+        "Cache-Control": "public, max-age=3600",
+      },
+    });
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Internal Server Error" },
