@@ -288,12 +288,12 @@ export function ChatbotOrdersClient({
                         <div style={{ fontSize: "12px", color: "#60a5fa", fontWeight: 600, display: "flex", flexDirection: "column", gap: "2px", background: "rgba(15, 23, 42, 0.5)", padding: "6px 8px", borderRadius: "8px" }}>
                           <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
                             <span>👤</span>
-                            <span>{order.customer_name || "زبون بدون اسم"}</span>
+                            <span>{(order as any).customer_name || "زبون بدون اسم"}</span>
                           </div>
-                          {order.customer_phone && (
+                          {(order as any).customer_phone && (
                             <div style={{ display: "flex", alignItems: "center", gap: "6px", color: "#a7f3d0", fontSize: "11px" }}>
                               <span>📞</span>
-                              <span style={{ direction: "ltr" }}>{order.customer_phone}</span>
+                              <span style={{ direction: "ltr" }}>{(order as any).customer_phone}</span>
                             </div>
                           )}
                         </div>
