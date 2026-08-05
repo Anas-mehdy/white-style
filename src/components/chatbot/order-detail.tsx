@@ -249,20 +249,20 @@ export function ChatbotOrderDetailClient({ initialData }: { initialData: OrderDe
             <div style={{ fontSize: "14px", color: "var(--fg)", display: "flex", flexDirection: "column", gap: "10px" }}>
               <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid rgba(255,255,255,0.06)", paddingBottom: "6px" }}>
                 <span style={{ color: "var(--muted)" }}>اسم الزبون:</span>
-                <span style={{ fontWeight: 700, color: "#fff" }}>{(order as any).customer_name || customer?.display_name || "غير محدد"}</span>
+                <span style={{ fontWeight: 700, color: "#fff" }}>{(order as any).customer_name || (customer as any)?.full_name || (customer as any)?.display_name || "غير محدد"}</span>
               </div>
 
               <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid rgba(255,255,255,0.06)", paddingBottom: "6px" }}>
                 <span style={{ color: "var(--muted)" }}>رقم الهاتف:</span>
                 <span style={{ fontWeight: 700, color: "#a7f3d0", direction: "ltr" }}>
-                  {(order as any).customer_phone || customer?.normalized_phone || customer?.external_key || "غير محدد"}
+                  {(order as any).customer_phone || (customer as any)?.phone_number || (customer as any)?.normalized_phone || (customer as any)?.external_key || "غير محدد"}
                 </span>
               </div>
 
               <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid rgba(255,255,255,0.06)", paddingBottom: "6px" }}>
                 <span style={{ color: "var(--muted)" }}>العنوان الكامل:</span>
                 <span style={{ fontWeight: 600, color: "#fff", maxWidth: "60%", textAlign: "left" }}>
-                  {(order as any).address_line || order.customer_address || "غير محدد"}
+                  {(order as any).address_line || (customer as any)?.address || order.customer_address || "غير محدد"}
                 </span>
               </div>
 
