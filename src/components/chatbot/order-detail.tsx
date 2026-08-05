@@ -253,9 +253,18 @@ export function ChatbotOrderDetailClient({ initialData }: { initialData: OrderDe
               </div>
 
               <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid rgba(255,255,255,0.06)", paddingBottom: "6px" }}>
-                <span style={{ color: "var(--muted)" }}>رقم الواتساب (المحادثة):</span>
+                <span style={{ color: "var(--muted)" }}>رقم الواتساب (المحادثة الأصلي):</span>
                 <span style={{ fontWeight: 700, color: "#38bdf8", direction: "ltr" }}>
-                  {(customer as any)?.phone_number || (customer as any)?.normalized_phone || (customer as any)?.external_key ? `+${((customer as any)?.phone_number || (customer as any)?.normalized_phone || (customer as any)?.external_key).replace(/^\+/, '')}` : "غير محدد"}
+                  {(() => {
+                    const extKey = (customer as any)?.external_key ? String((customer as any).external_key).trim() : null;
+                    if (!extKey) return "غير محدد";
+                    const clean = extKey.replace(/[^\d+]/g, '');
+                    if (/^\+?\d{8,15}$/.test(clean)) {
+                      return clean.startsWith('+') ? clean : `+${clean}`;
+                    }
+                    if (extKey.length > 20) return "اختبار (n8n UI)";
+                    return extKey;
+                  })()}
                 </span>
               </div>
 

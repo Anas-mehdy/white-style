@@ -99,7 +99,11 @@ export function ChatbotOrdersClient({
   };
 
   const filteredOrders = orders.filter((o) => {
-    const matchesSearch = !search || o.id.toLowerCase().includes(search.toLowerCase()) || ((o as any).customer_name && (o as any).customer_name.includes(search)) || ((o as any).customer_phone && (o as any).customer_phone.includes(search));
+    const matchesSearch = !search || 
+      o.id.toLowerCase().includes(search.toLowerCase()) || 
+      ((o as any).customer_name && (o as any).customer_name.includes(search)) || 
+      ((o as any).customer_phone && (o as any).customer_phone.includes(search)) ||
+      ((o as any).wa_phone && (o as any).wa_phone.includes(search));
     const matchesStatus = statusFilter === "all" || o.status === statusFilter;
     return matchesSearch && matchesStatus;
   });

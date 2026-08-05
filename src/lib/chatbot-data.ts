@@ -281,8 +281,20 @@ export async function getOrdersList(statusFilter?: OrderStatus | "all") {
 
   const enrichedOrders = (orders ?? []).map(o => {
     const cust = o.customer_id ? customersMap.get(o.customer_id) : null;
-    const rawWaPhone = cust?.normalized_phone || cust?.external_key || null;
-    const formattedWa = rawWaPhone && !rawWaPhone.startsWith("+") ? `+${rawWaPhone}` : rawWaPhone;
+    const extKey = cust?.external_key ? String(cust.external_key).trim() : null;
+    let formattedWa: string | null = null;
+
+    if (extKey) {
+      const cleanDigits = extKey.replace(/[^\d+]/g, '');
+      if (/^\+?\d{8,15}$/.test(cleanDigits)) {
+        formattedWa = cleanDigits.startsWith('+') ? cleanDigits : `+${cleanDigits}`;
+      } else if (extKey.length > 20) {
+        formattedWa = "اختبار (n8n UI)";
+      } else {
+        formattedWa = extKey;
+      }
+    }
+
     return {
       ...o,
       wa_phone: formattedWa
