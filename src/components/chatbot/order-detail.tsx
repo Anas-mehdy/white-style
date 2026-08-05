@@ -1,20 +1,18 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import Link from "next/link";
 import { ChatbotNav } from "./chatbot-nav";
 import { OrderDetailViewModel } from "@/types/chatbot";
+import { ToastContainer, Toast } from "./ui";
 import {
   ArrowRight,
   ShoppingBag,
   User,
-  Truck,
   DollarSign,
-  TrendingUp,
   Link2,
   Clock,
-  MessageSquare,
-  CheckCircle2
+  MessageSquare
 } from "lucide-react";
 
 const formatILS = (n: number) =>
@@ -23,8 +21,63 @@ const formatILS = (n: number) =>
 export function ChatbotOrderDetailClient({ initialData }: { initialData: OrderDetailViewModel }) {
   const { order, customer, items, shippingZone, attribution, events, conversation } = initialData;
 
+  const [isUpdating, setIsUpdating] = useState(false);
+  const [toasts, setToasts] = useState<Toast[]>([]);
+
+  const addToast = (type: "success" | "error" | "info", message: string) => {
+    const id = Math.random().toString(36).substr(2, 9);
+    setToasts((prev) => [...prev, { id, type, message }]);
+  };
+
+  const getNextStatusConfig = (currentStatus: string) => {
+    switch (currentStatus) {
+      case "draft":
+      case "collecting":
+      case "awaiting_confirmation":
+        return { nextStatus: "confirmed", label: "تأكيد الطلب ونقله لمؤكد", color: "#38bdf8" };
+      case "confirmed":
+        return { nextStatus: "shipped", label: "تعيين الطلب إلى تم الشحن", color: "#a7f3d0" };
+      case "shipped":
+        return { nextStatus: "delivered", label: "تعيين الطلب إلى مُستلم", color: "#34d399" };
+      default:
+        return null;
+    }
+  };
+
+  const nextCfg = getNextStatusConfig(order.status);
+
+  const handleQuickStatusChange = async (newStatus: string) => {
+    setIsUpdating(true);
+    const idempotencyKey = `evt_${order.id}_${Date.now()}`;
+
+    try {
+      const res = await fetch("/api/chatbot/orders/status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          orderId: order.id,
+          newStatus,
+          idempotencyKey
+        })
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        addToast("success", data.message || "تم تحديث حالة الطلب بنجاح");
+        window.location.reload();
+      } else {
+        addToast("error", data.message || "تعذر تغيير حالة الطلب");
+      }
+    } catch (err: unknown) {
+      addToast("error", "حدث خطأ أثناء الاتصال بالخادم");
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
   return (
     <div style={{ padding: "8px 0" }}>
+      <ToastContainer toasts={toasts} onClose={(id) => setToasts((t) => t.filter((x) => x.id !== id))} />
       <ChatbotNav subtitle={`تفاصيل الطلب #${order.id.substring(0, 8)}`} />
 
       {/* Back Button */}
@@ -82,19 +135,38 @@ export function ChatbotOrderDetailClient({ initialData }: { initialData: OrderDe
             </h2>
           </div>
 
-          {conversation && (
-            <Link
-              href={`/chatbot/inbox?conversationId=${conversation.id}`}
-              className="btn primary-btn"
-              style={{ gap: "8px", fontSize: "13px" }}
-            >
-              <MessageSquare size={16} /> الذهاب للمحادثة المرتطبة
-            </Link>
-          )}
+          <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+            {nextCfg && (
+              <button
+                onClick={() => handleQuickStatusChange(nextCfg.nextStatus)}
+                disabled={isUpdating}
+                className="btn"
+                style={{
+                  background: "rgba(56, 189, 248, 0.2)",
+                  color: nextCfg.color,
+                  border: "1px solid rgba(56, 189, 248, 0.4)",
+                  fontSize: "13px",
+                  padding: "8px 16px"
+                }}
+              >
+                {nextCfg.label}
+              </button>
+            )}
+
+            {conversation && (
+              <Link
+                href={`/chatbot/inbox?conversationId=${conversation.id}`}
+                className="btn primary-btn"
+                style={{ gap: "8px", fontSize: "13px" }}
+              >
+                <MessageSquare size={16} /> الذهاب للمحادثة المرتطبة
+              </Link>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* Grid Layout: Financial & Items Left / Attribution & Customer Right */}
+      {/* Grid Layout: Financial & Items Left / Customer Right */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: "20px" }}>
         
         {/* Left Column: Items Snapshot & Financial breakdown */}
@@ -103,7 +175,7 @@ export function ChatbotOrderDetailClient({ initialData }: { initialData: OrderDe
           {/* Items Table */}
           <div style={{ background: "rgba(15, 23, 42, 0.6)", borderRadius: "16px", border: "1px solid rgba(255, 255, 255, 0.1)", padding: "20px" }}>
             <h3 style={{ fontSize: "16px", fontWeight: 700, color: "#fff", marginBottom: "16px", display: "flex", alignItems: "center", gap: "8px" }}>
-              <ShoppingBag size={18} style={{ color: "var(--accent-glow)" }} /> الأصناف المطلوبة (Snapshots غير قابلة للتغيير)
+              <ShoppingBag size={18} style={{ color: "var(--accent-glow)" }} /> الأصناف المطلوبة
             </h3>
 
             <div style={{ overflowX: "auto" }}>
@@ -145,34 +217,22 @@ export function ChatbotOrderDetailClient({ initialData }: { initialData: OrderDe
           {/* Financial Breakdown Card */}
           <div style={{ background: "rgba(15, 23, 42, 0.6)", borderRadius: "16px", border: "1px solid rgba(255, 255, 255, 0.1)", padding: "20px" }}>
             <h3 style={{ fontSize: "16px", fontWeight: 700, color: "#fff", marginBottom: "16px", display: "flex", alignItems: "center", gap: "8px" }}>
-              <DollarSign size={18} style={{ color: "#34d399" }} /> التكلفة والربحية المالية
+              <DollarSign size={18} style={{ color: "#34d399" }} /> إجمالي التكلفة والحساب
             </h3>
 
             <div style={{ display: "flex", flexDirection: "column", gap: "10px", fontSize: "14px" }}>
               <div style={{ display: "flex", justifyContent: "space-between", color: "var(--fg)" }}>
-                <span>المجموع الفرعي (Subtotal):</span>
+                <span>المجموع الفرعي للبضاعة (Subtotal):</span>
                 <span>{formatILS(Number(order.subtotal ?? 0))}</span>
               </div>
               <div style={{ display: "flex", justifyContent: "space-between", color: "var(--fg)" }}>
-                <span>رسوم الشحن المحصلة من الزبون (Shipping Fee):</span>
+                <span>رسوم التوصيل للشحن (Shipping Fee):</span>
                 <span>{formatILS(Number(order.shipping_fee ?? 0))}</span>
               </div>
-              <div style={{ display: "flex", justifyContent: "space-between", color: "var(--muted)" }}>
-                <span>التكلفة الفعلية للشحن (Actual Carrier Cost):</span>
-                <span>{order.actual_shipping_cost ? formatILS(Number(order.actual_shipping_cost)) : "غير مدخل"}</span>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between", color: "var(--muted)" }}>
-                <span>تكلفة البضاعة المبيعة (COGS):</span>
-                <span>{formatILS(Number(order.cogs ?? 0))}</span>
-              </div>
               <div style={{ height: "1px", background: "rgba(255,255,255,0.1)", margin: "4px 0" }} />
-              <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 800, fontSize: "16px", color: "#10b981" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 800, fontSize: "17px", color: "#10b981" }}>
                 <span>المجموع الإجمالي للطلب:</span>
                 <span>{formatILS(Number(order.total ?? 0))}</span>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 800, fontSize: "16px", color: Number(order.gross_profit ?? 0) >= 0 ? "#34d399" : "#f87171" }}>
-                <span>الربح الإجمالي (Gross Profit):</span>
-                <span>{formatILS(Number(order.gross_profit ?? 0))}</span>
               </div>
             </div>
           </div>
@@ -181,22 +241,42 @@ export function ChatbotOrderDetailClient({ initialData }: { initialData: OrderDe
         {/* Right Column: Customer & Address / Attribution / Event Timeline */}
         <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
           
-          {/* Customer Card */}
+          {/* Customer Details Card */}
           <div style={{ background: "rgba(15, 23, 42, 0.6)", borderRadius: "16px", border: "1px solid rgba(255, 255, 255, 0.1)", padding: "20px" }}>
-            <h3 style={{ fontSize: "16px", fontWeight: 700, color: "#fff", marginBottom: "12px", display: "flex", alignItems: "center", gap: "8px" }}>
+            <h3 style={{ fontSize: "16px", fontWeight: 700, color: "#fff", marginBottom: "16px", display: "flex", alignItems: "center", gap: "8px" }}>
               <User size={18} style={{ color: "#38bdf8" }} /> بيانات الزبون والتوصيل
             </h3>
-            <div style={{ fontSize: "13px", color: "var(--fg)", lineHeight: 1.6 }}>
-              {customer ? (
-                <>
-                  <div><strong>ملاحظات الزبون:</strong> {customer.notes || "لا توجد ملاحظات"}</div>
-                </>
-              ) : (
-                <div style={{ color: "var(--muted)" }}>بيانات الزبون غير مقترنة بعد.</div>
-              )}
-              {shippingZone && (
-                <div style={{ marginTop: "8px", paddingTop: "8px", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
-                  <strong>منطقة الشحن:</strong> {shippingZone.name_ar}
+            <div style={{ fontSize: "14px", color: "var(--fg)", display: "flex", flexDirection: "column", gap: "10px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid rgba(255,255,255,0.06)", paddingBottom: "6px" }}>
+                <span style={{ color: "var(--muted)" }}>اسم الزبون:</span>
+                <span style={{ fontWeight: 700, color: "#fff" }}>{order.customer_name || customer?.display_name || "غير محدد"}</span>
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid rgba(255,255,255,0.06)", paddingBottom: "6px" }}>
+                <span style={{ color: "var(--muted)" }}>رقم الهاتف:</span>
+                <span style={{ fontWeight: 700, color: "#a7f3d0", direction: "ltr" }}>
+                  {order.customer_phone || customer?.normalized_phone || customer?.external_key || "غير محدد"}
+                </span>
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid rgba(255,255,255,0.06)", paddingBottom: "6px" }}>
+                <span style={{ color: "var(--muted)" }}>العنوان الكامل:</span>
+                <span style={{ fontWeight: 600, color: "#fff", maxWidth: "60%", textAlign: "left" }}>
+                  {order.address_line || "غير محدد"}
+                </span>
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid rgba(255,255,255,0.06)", paddingBottom: "6px" }}>
+                <span style={{ color: "var(--muted)" }}>منطقة الشحن:</span>
+                <span style={{ fontWeight: 600, color: "#fff" }}>
+                  {shippingZone?.name_ar || "غير محدد"}
+                </span>
+              </div>
+
+              {customer?.notes && (
+                <div style={{ marginTop: "4px" }}>
+                  <span style={{ color: "var(--muted)" }}>ملاحظات الزبون:</span>
+                  <div style={{ marginTop: "2px", color: "#e2e8f0", fontSize: "13px" }}>{customer.notes}</div>
                 </div>
               )}
             </div>
@@ -204,7 +284,7 @@ export function ChatbotOrderDetailClient({ initialData }: { initialData: OrderDe
 
           {/* Attribution Chain Card */}
           <div style={{ background: "rgba(15, 23, 42, 0.6)", borderRadius: "16px", border: "1px solid rgba(255, 255, 255, 0.1)", padding: "20px" }}>
-            <h3 style={{ fontSize: "16px", fontWeight: 700, color: "#fff", marginBottom: "12px", display: "flex", alignItems: "center", gap: "8px" }}>
+            <h3 style={{ fontSize: "16px", fontWeight 700, color: "#fff", marginBottom: "12px", display: "flex", alignItems: "center", gap: "8px" }}>
               <Link2 size={18} style={{ color: "#c084fc" }} /> سلسلة النسبة الإعلانية (Attribution Chain)
             </h3>
             <div style={{ fontSize: "13px", color: "var(--fg)", display: "flex", flexDirection: "column", gap: "6px" }}>

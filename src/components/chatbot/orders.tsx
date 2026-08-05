@@ -57,34 +57,24 @@ export function ChatbotOrdersClient({
     setToasts((prev) => [...prev, { id, type, message }]);
   };
 
-  const handleOpenStatusModal = (order: ChatbotOrder, status: string) => {
-    setStatusModalOrder(order);
-    setTargetStatus(status);
-    setActualCostInput(Number(order.actual_shipping_cost ?? 30));
-  };
-
-  const handleConfirmStatusChange = async () => {
-    if (!statusModalOrder || !targetStatus) return;
-
+  const handleQuickStatusChange = async (order: ChatbotOrder, newStatus: string) => {
     setIsUpdating(true);
-    const idempotencyKey = `evt_${statusModalOrder.id}_${Date.now()}`;
+    const idempotencyKey = `evt_${order.id}_${Date.now()}`;
 
     try {
       const res = await fetch("/api/chatbot/orders/status", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          orderId: statusModalOrder.id,
-          newStatus: targetStatus,
-          idempotencyKey,
-          actualShippingCost: targetStatus === "delivered" ? actualCostInput : undefined
+          orderId: order.id,
+          newStatus,
+          idempotencyKey
         })
       });
 
       const data = await res.json();
       if (data.success) {
-        addToast("success", data.message || "تم تغيير حالة الطلب بنجاح");
-        setStatusModalOrder(null);
+        addToast("success", data.message || "تم تحديث حالة الطلب بنجاح");
         window.location.reload();
       } else {
         addToast("error", data.message || "تعذر تغيير حالة الطلب");
@@ -96,8 +86,23 @@ export function ChatbotOrdersClient({
     }
   };
 
+  const getNextStatusConfig = (currentStatus: string) => {
+    switch (currentStatus) {
+      case "draft":
+      case "collecting":
+      case "awaiting_confirmation":
+        return { nextStatus: "confirmed", label: "تأكيد الطلب ونقله لمؤكد", color: "#38bdf8" };
+      case "confirmed":
+        return { nextStatus: "shipped", label: "تعيين الطلب إلى تم الشحن", color: "#a7f3d0" };
+      case "shipped":
+        return { nextStatus: "delivered", label: "تعيين الطلب إلى مُستلم", color: "#34d399" };
+      default:
+        return null;
+    }
+  };
+
   const filteredOrders = orders.filter((o) => {
-    const matchesSearch = !search || o.id.toLowerCase().includes(search.toLowerCase());
+    const matchesSearch = !search || o.id.toLowerCase().includes(search.toLowerCase()) || (o.customer_name && o.customer_name.includes(search)) || (o.customer_phone && o.customer_phone.includes(search));
     const matchesStatus = statusFilter === "all" || o.status === statusFilter;
     return matchesSearch && matchesStatus;
   });
@@ -255,6 +260,7 @@ export function ChatbotOrdersClient({
                 ) : (
                   stOrders.map((order) => {
                     const orderItems = items.filter((i) => i.order_id === order.id);
+                    const nextCfg = getNextStatusConfig(order.status);
 
                     return (
                       <div
@@ -278,33 +284,48 @@ export function ChatbotOrdersClient({
                           </span>
                         </div>
 
+                        {/* Customer Name & Phone Number */}
+                        <div style={{ fontSize: "12px", color: "#60a5fa", fontWeight: 600, display: "flex", flexDirection: "column", gap: "2px", background: "rgba(15, 23, 42, 0.5)", padding: "6px 8px", borderRadius: "8px" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                            <span>👤</span>
+                            <span>{order.customer_name || "زبون بدون اسم"}</span>
+                          </div>
+                          {order.customer_phone && (
+                            <div style={{ display: "flex", alignItems: "center", gap: "6px", color: "#a7f3d0", fontSize: "11px" }}>
+                              <span>📞</span>
+                              <span style={{ direction: "ltr" }}>{order.customer_phone}</span>
+                            </div>
+                          )}
+                        </div>
+
                         <div style={{ fontSize: "13px", color: "#fff", fontWeight: 600 }}>
                           {orderItems.length ? `${orderItems.length} منتج (${orderItems[0].product_name_snapshot || "—"})` : "طلب بدون أصناف"}
                         </div>
 
-                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: "4px" }}>
-                          <div>
-                            <span style={{ fontSize: "10px", color: "var(--muted)", display: "block" }}>المجموع</span>
+                        <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginTop: "4px" }}>
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                            <span style={{ fontSize: "10px", color: "var(--muted)" }}>المجموع</span>
                             <span style={{ fontSize: "14px", fontWeight: 800, color: "#10b981" }}>
                               {formatILS(Number(order.total ?? 0))}
                             </span>
                           </div>
 
-                          <div style={{ display: "flex", gap: "6px" }}>
-                            {st !== "delivered" && (
+                          <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+                            {nextCfg && (
                               <button
-                                onClick={() => handleOpenStatusModal(order, "delivered")}
+                                onClick={() => handleQuickStatusChange(order, nextCfg.nextStatus)}
+                                disabled={isUpdating}
                                 className="btn"
-                                style={{ background: "rgba(16, 185, 129, 0.2)", color: "#34d399", border: "none", fontSize: "11px", padding: "4px 8px" }}
+                                style={{ background: "rgba(56, 189, 248, 0.15)", color: nextCfg.color, border: "1px solid rgba(56, 189, 248, 0.3)", fontSize: "11px", padding: "5px 8px", flex: 1 }}
                               >
-                                تسليم
+                                {nextCfg.label}
                               </button>
                             )}
 
                             <Link
                               href={`/chatbot/orders/${order.id}`}
                               className="btn"
-                              style={{ background: "rgba(255,255,255,0.08)", color: "#fff", border: "none", fontSize: "11px", padding: "4px 8px" }}
+                              style={{ background: "rgba(255,255,255,0.08)", color: "#fff", border: "none", fontSize: "11px", padding: "5px 10px" }}
                             >
                               التفاصيل
                             </Link>
