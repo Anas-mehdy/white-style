@@ -4,7 +4,7 @@ import React, { useState } from "react";
 import Link from "next/link";
 import { ChatbotNav } from "./chatbot-nav";
 import { ChatbotOrder, ChatbotOrderItem, OrderStatus } from "@/types/chatbot";
-import { ConfirmationModal, ToastContainer, Toast, EmptyState } from "./ui";
+import { ToastContainer, Toast, EmptyState } from "./ui";
 import {
   ShoppingBag,
   Columns,
@@ -47,9 +47,6 @@ export function ChatbotOrdersClient({
   const [search, setSearch] = useState("");
 
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const [statusModalOrder, setStatusModalOrder] = useState<ChatbotOrder | null>(null);
-  const [targetStatus, setTargetStatus] = useState<string>("");
-  const [actualCostInput, setActualCostInput] = useState<number>(30);
   const [isUpdating, setIsUpdating] = useState(false);
 
   const addToast = (type: "success" | "error" | "info", message: string) => {
@@ -102,7 +99,7 @@ export function ChatbotOrdersClient({
   };
 
   const filteredOrders = orders.filter((o) => {
-    const matchesSearch = !search || o.id.toLowerCase().includes(search.toLowerCase()) || (o.customer_name && o.customer_name.includes(search)) || (o.customer_phone && o.customer_phone.includes(search));
+    const matchesSearch = !search || o.id.toLowerCase().includes(search.toLowerCase()) || ((o as any).customer_name && (o as any).customer_name.includes(search)) || ((o as any).customer_phone && (o as any).customer_phone.includes(search));
     const matchesStatus = statusFilter === "all" || o.status === statusFilter;
     return matchesSearch && matchesStatus;
   });
@@ -403,44 +400,6 @@ export function ChatbotOrdersClient({
             </tbody>
           </table>
         </div>
-      )}
-
-      {/* Confirmation & Actual Shipping Cost Modal for Delivered status */}
-      {statusModalOrder && (
-        <ConfirmationModal
-          isOpen={true}
-          title={`تغيير حالة الطلب إلى: ${statusConfig[targetStatus]?.label || targetStatus}`}
-          message={`هل أنت متأكد من تغيير حالة الطلب #${statusModalOrder.id.substring(0, 8)}؟`}
-          confirmText="تأكيد التغيير"
-          onConfirm={handleConfirmStatusChange}
-          onCancel={() => setStatusModalOrder(null)}
-        >
-          {targetStatus === "delivered" && (
-            <div style={{ marginTop: "16px", padding: "16px", borderRadius: "12px", background: "rgba(99, 102, 241, 0.1)", border: "1px solid rgba(99, 102, 241, 0.2)" }}>
-              <label style={{ fontSize: "13px", fontWeight: 600, color: "#fff", display: "block", marginBottom: "6px" }}>
-                التكلفة الفعليه للشحن من شركة التوصيل (شيكل) *
-              </label>
-              <input
-                type="number"
-                value={actualCostInput}
-                onChange={(e) => setActualCostInput(Number(e.target.value))}
-                placeholder="أدخل تكلفة الشحن الفعلية..."
-                style={{
-                  width: "100%",
-                  padding: "8px 12px",
-                  borderRadius: "8px",
-                  background: "#0f172a",
-                  border: "1px solid rgba(255,255,255,0.2)",
-                  color: "#fff",
-                  fontSize: "14px"
-                }}
-              />
-              <span style={{ fontSize: "11px", color: "var(--muted)", marginTop: "4px", display: "block" }}>
-                رسوم الشحن المحصلة من الزبون: {formatILS(Number(statusModalOrder.shipping_fee ?? 0))}
-              </span>
-            </div>
-          )}
-        </ConfirmationModal>
       )}
     </div>
   );
