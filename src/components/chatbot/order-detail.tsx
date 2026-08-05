@@ -284,7 +284,7 @@ export function ChatbotOrderDetailClient({ initialData }: { initialData: OrderDe
 
           {/* Attribution Chain Card */}
           <div style={{ background: "rgba(15, 23, 42, 0.6)", borderRadius: "16px", border: "1px solid rgba(255, 255, 255, 0.1)", padding: "20px" }}>
-            <h3 style={{ fontSize: "16px", fontWeight 700, color: "#fff", marginBottom: "12px", display: "flex", alignItems: "center", gap: "8px" }}>
+            <h3 style={{ fontSize: "16px", fontWeight: 700, color: "#fff", marginBottom: "12px", display: "flex", alignItems: "center", gap: "8px" }}>
               <Link2 size={18} style={{ color: "#c084fc" }} /> سلسلة النسبة الإعلانية (Attribution Chain)
             </h3>
             <div style={{ fontSize: "13px", color: "var(--fg)", display: "flex", flexDirection: "column", gap: "6px" }}>
