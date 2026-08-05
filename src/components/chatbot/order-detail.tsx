@@ -253,9 +253,16 @@ export function ChatbotOrderDetailClient({ initialData }: { initialData: OrderDe
               </div>
 
               <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid rgba(255,255,255,0.06)", paddingBottom: "6px" }}>
-                <span style={{ color: "var(--muted)" }}>رقم الهاتف:</span>
+                <span style={{ color: "var(--muted)" }}>رقم الواتساب (المحادثة):</span>
+                <span style={{ fontWeight: 700, color: "#38bdf8", direction: "ltr" }}>
+                  {(customer as any)?.phone_number || (customer as any)?.normalized_phone || (customer as any)?.external_key ? `+${((customer as any)?.phone_number || (customer as any)?.normalized_phone || (customer as any)?.external_key).replace(/^\+/, '')}` : "غير محدد"}
+                </span>
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid rgba(255,255,255,0.06)", paddingBottom: "6px" }}>
+                <span style={{ color: "var(--muted)" }}>رقم هاتف التثبيت/التوصيل:</span>
                 <span style={{ fontWeight: 700, color: "#a7f3d0", direction: "ltr" }}>
-                  {(order as any).customer_phone || (customer as any)?.phone_number || (customer as any)?.normalized_phone || (customer as any)?.external_key || "غير محدد"}
+                  {(order as any).customer_phone || "غير محدد"}
                 </span>
               </div>
 

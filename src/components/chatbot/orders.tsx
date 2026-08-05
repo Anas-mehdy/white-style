@@ -281,16 +281,24 @@ export function ChatbotOrdersClient({
                           </span>
                         </div>
 
-                        {/* Customer Name & Phone Number */}
-                        <div style={{ fontSize: "12px", color: "#60a5fa", fontWeight: 600, display: "flex", flexDirection: "column", gap: "2px", background: "rgba(15, 23, 42, 0.5)", padding: "6px 8px", borderRadius: "8px" }}>
+                        {/* Customer Name, WhatsApp Phone & Delivery Phone */}
+                        <div style={{ fontSize: "12px", color: "#60a5fa", fontWeight: 600, display: "flex", flexDirection: "column", gap: "4px", background: "rgba(15, 23, 42, 0.6)", padding: "8px", borderRadius: "10px", border: "1px solid rgba(255, 255, 255, 0.06)" }}>
                           <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
                             <span>👤</span>
-                            <span>{(order as any).customer_name || "زبون بدون اسم"}</span>
+                            <span style={{ color: "#fff", fontWeight: 700 }}>{(order as any).customer_name || "زبون بدون اسم"}</span>
                           </div>
+
+                          {(order as any).wa_phone && (
+                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", color: "#38bdf8", fontSize: "11px" }}>
+                              <span>💬 واتساب:</span>
+                              <span style={{ direction: "ltr", fontWeight: 700 }}>{(order as any).wa_phone}</span>
+                            </div>
+                          )}
+
                           {(order as any).customer_phone && (
-                            <div style={{ display: "flex", alignItems: "center", gap: "6px", color: "#a7f3d0", fontSize: "11px" }}>
-                              <span>📞</span>
-                              <span style={{ direction: "ltr" }}>{(order as any).customer_phone}</span>
+                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", color: "#a7f3d0", fontSize: "11px" }}>
+                              <span>📞 للتثبيت:</span>
+                              <span style={{ direction: "ltr", fontWeight: 700 }}>{(order as any).customer_phone}</span>
                             </div>
                           )}
                         </div>

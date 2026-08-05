@@ -265,17 +265,31 @@ export async function getOrdersList(statusFilter?: OrderStatus | "all") {
   if (error) throw new Error(error.message);
 
   const orderIds = (orders ?? []).map(o => o.id);
+  const customerIds = Array.from(new Set((orders ?? []).map(o => o.customer_id).filter(Boolean)));
+
   let items: ChatbotOrderItem[] = [];
+  let customersMap = new Map<string, any>();
+
   if (orderIds.length > 0) {
-    const { data: itemRows } = await supabase
-      .from("ws_chatbot_order_items")
-      .select("*")
-      .eq("organization_id", orgId)
-      .in("order_id", orderIds);
-    items = itemRows ?? [];
+    const [itemsRes, custRes] = await Promise.all([
+      supabase.from("ws_chatbot_order_items").select("*").eq("organization_id", orgId).in("order_id", orderIds),
+      customerIds.length > 0 ? supabase.from("ws_chatbot_customers").select("*").eq("organization_id", orgId).in("id", customerIds as string[]) : Promise.resolve({ data: [] })
+    ]);
+    items = itemsRes.data ?? [];
+    (custRes.data ?? []).forEach(c => customersMap.set(c.id, c));
   }
 
-  return { orders: orders ?? [], items };
+  const enrichedOrders = (orders ?? []).map(o => {
+    const cust = o.customer_id ? customersMap.get(o.customer_id) : null;
+    const rawWaPhone = cust?.normalized_phone || cust?.external_key || null;
+    const formattedWa = rawWaPhone && !rawWaPhone.startsWith("+") ? `+${rawWaPhone}` : rawWaPhone;
+    return {
+      ...o,
+      wa_phone: formattedWa
+    };
+  });
+
+  return { orders: enrichedOrders, items };
 }
 
 export async function getOrderDetail(orderId: string): Promise<OrderDetailViewModel | null> {
