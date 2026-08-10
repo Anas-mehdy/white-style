@@ -844,7 +844,7 @@ export function DashboardClient({
           <h1>نظرة عامة</h1>
           {data.syncStatus && (
             <p style={{ margin: 0, color: "var(--muted)", fontSize: "12.5px", fontWeight: "normal" }}>
-              {data.syncStatus.status === "fresh" ? data.syncStatus.message : "يتم عرض البيانات المحفوظة محليًا"}
+              {data.syncStatus.message}
             </p>
           )}
         </div>
@@ -856,7 +856,7 @@ export function DashboardClient({
 
       {notice && <div className="sync-notice">{notice}</div>}
 
-      {data.syncStatus && data.syncStatus.status !== "fresh" && (
+      {data.syncStatus && data.syncStatus.status !== "fresh" && data.syncStatus.status !== "stale" && (
         <div style={{
           background: data.syncStatus.status === "failed" ? "rgba(239, 68, 68, 0.1)" : "rgba(245, 158, 11, 0.1)",
           border: data.syncStatus.status === "failed" ? "1px solid rgb(239, 68, 68)" : "1px solid rgb(245, 158, 11)",

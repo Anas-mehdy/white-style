@@ -289,6 +289,42 @@ export async function getDashboardData(
     ["succeeded", "failed", "partial"].includes(r.status)
   );
 
+function formatTimeAgo(timestampMs: number): string {
+  const diffMs = Math.max(0, Date.now() - timestampMs);
+  const minutes = Math.floor(diffMs / 60000);
+  const hours = Math.floor(minutes / 60);
+  const days = Math.floor(hours / 24);
+
+  if (minutes <= 1) {
+    return "آخر تحديث: منذ أقل من دقيقة";
+  } else if (minutes === 2) {
+    return "آخر تحديث: منذ دقيقتين";
+  } else if (minutes < 60) {
+    if (minutes >= 3 && minutes <= 10) {
+      return `آخر تحديث: منذ ${minutes} دقائق`;
+    }
+    return `آخر تحديث: منذ ${minutes} دقيقة`;
+  } else if (hours < 24) {
+    if (hours === 1) {
+      return "آخر تحديث: منذ ساعة";
+    } else if (hours === 2) {
+      return "آخر تحديث: منذ ساعتين";
+    } else if (hours >= 3 && hours <= 10) {
+      return `آخر تحديث: منذ ${hours} ساعات`;
+    }
+    return `آخر تحديث: منذ ${hours} ساعة`;
+  } else {
+    if (days === 1) {
+      return "آخر تحديث: منذ يوم";
+    } else if (days === 2) {
+      return "آخر تحديث: منذ يومين";
+    } else if (days >= 3 && days <= 10) {
+      return `آخر تحديث: منذ ${days} أيام`;
+    }
+    return `آخر تحديث: منذ ${days} يومًا`;
+  }
+}
+
   if (totalConnected === 0) {
     syncStatus = "never_synced";
     syncMessage = "لم تتم مزامنة بيانات الحسابات بعد";
@@ -302,42 +338,27 @@ export async function getDashboardData(
 
     if (latestAccountSync > 0) {
       lastSyncedAt = new Date(latestAccountSync).toISOString();
-      const ageHours = (Date.now() - latestAccountSync) / (3600 * 1000);
 
-      if (ageHours > 2) {
-        syncStatus = "stale";
-        syncMessage = "البيانات لم تُحدّث منذ أكثر من ساعتين";
-      } else {
-        // Look at the latest finished sync run to check for partial failures
-        if (latestFinishedRun && latestFinishedRun.status === "partial") {
-          syncStatus = "partial";
-          
-          // Count based on the last run cursor state or default to safe estimation
-          const cursor = latestFinishedRun.cursor_state as Record<string, unknown> | null;
-          if (cursor && typeof cursor === "object" && typeof cursor.succeeded_accounts === "number") {
-            successfulAccounts = cursor.succeeded_accounts;
-            failedAccounts = Math.max(0, totalConnected - successfulAccounts);
-          } else {
-            successfulAccounts = connectedAccounts.filter(a => a.last_synced_at && (Date.now() - new Date(a.last_synced_at).getTime()) < 2 * 3600 * 1000).length;
-            failedAccounts = Math.max(0, totalConnected - successfulAccounts);
-          }
-          syncMessage = `تم تحديث ${successfulAccounts} حسابات من أصل ${totalConnected} — تعذر تحديث ${failedAccounts} حسابات`;
-        } else if (latestFinishedRun && latestFinishedRun.status === "failed") {
-          syncStatus = "failed";
-          syncMessage = "تعذر تحديث الحسابات — يتم عرض آخر بيانات محفوظة";
+      // Look at the latest finished sync run to check for partial failures
+      if (latestFinishedRun && latestFinishedRun.status === "partial") {
+        syncStatus = "partial";
+        
+        // Count based on the last run cursor state or default to safe estimation
+        const cursor = latestFinishedRun.cursor_state as Record<string, unknown> | null;
+        if (cursor && typeof cursor === "object" && typeof cursor.succeeded_accounts === "number") {
+          successfulAccounts = cursor.succeeded_accounts;
+          failedAccounts = Math.max(0, totalConnected - successfulAccounts);
         } else {
-          syncStatus = "fresh";
-          const minutes = Math.floor((Date.now() - latestAccountSync) / 60000);
-          if (minutes <= 1) {
-            syncMessage = "آخر تحديث: منذ أقل من دقيقة";
-          } else if (minutes === 2) {
-            syncMessage = "آخر تحديث: منذ دقيقتين";
-          } else if (minutes >= 3 && minutes <= 10) {
-            syncMessage = `آخر تحديث: منذ ${minutes} دقائق`;
-          } else {
-            syncMessage = `آخر تحديث: منذ ${minutes} دقيقة`;
-          }
+          successfulAccounts = connectedAccounts.filter(a => a.last_synced_at && (Date.now() - new Date(a.last_synced_at).getTime()) < 2 * 3600 * 1000).length;
+          failedAccounts = Math.max(0, totalConnected - successfulAccounts);
         }
+        syncMessage = `تم تحديث ${successfulAccounts} حسابات من أصل ${totalConnected} — تعذر تحديث ${failedAccounts} حسابات`;
+      } else if (latestFinishedRun && latestFinishedRun.status === "failed") {
+        syncStatus = "failed";
+        syncMessage = "تعذر تحديث الحسابات — يتم عرض آخر بيانات محفوظة";
+      } else {
+        syncStatus = "fresh";
+        syncMessage = formatTimeAgo(latestAccountSync);
       }
     } else {
       if (latestFinishedRun && latestFinishedRun.status === "failed") {
